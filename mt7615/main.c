@@ -10,6 +10,7 @@
 #include <linux/etherdevice.h>
 #include <linux/module.h>
 #include "mt7615.h"
+#include "../dma.h"
 #include "mcu.h"
 
 static bool mt7615_dev_running(struct mt7615_dev *dev)
@@ -222,6 +223,25 @@ void mt7615_remove_interface(struct ieee80211_hw *hw,
 }
 EXPORT_SYMBOL_GPL(mt7615_remove_interface);
 
+static void mt7615_init_dfs_state(struct mt7615_phy *phy)
+{
+	struct mt76_phy *mphy = phy->mt76;
+	struct ieee80211_hw *hw = mphy->hw;
+	struct cfg80211_chan_def *chandef = &hw->conf.chandef;
+
+	if (hw->conf.flags & IEEE80211_CONF_OFFCHANNEL)
+		return;
+
+	if (!(chandef->chan->flags & IEEE80211_CHAN_RADAR))
+		return;
+
+	if (mphy->chandef.chan->center_freq == chandef->chan->center_freq &&
+	    mphy->chandef.width == chandef->width)
+		return;
+
+	phy->dfs_state = -1;
+}
+
 static int mt7615_set_channel(struct mt7615_phy *phy)
 {
 	struct mt7615_dev *dev = phy->dev;
@@ -233,7 +253,7 @@ static int mt7615_set_channel(struct mt7615_phy *phy)
 	mutex_lock(&dev->mt76.mutex);
 	set_bit(MT76_RESET, &phy->mt76->state);
 
-	phy->dfs_state = -1;
+	mt7615_init_dfs_state(phy);
 	mt76_set_channel(phy->mt76);
 
 	ret = mt7615_mcu_set_chan_info(phy, MCU_EXT_CMD_CHANNEL_SWITCH);
@@ -641,7 +661,7 @@ int mt7615_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		break;
 	case IEEE80211_AMPDU_TX_START:
 		mtxq->agg_ssn = IEEE80211_SN_TO_SEQ(ssn);
-		ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
+        ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
 		break;
 	case IEEE80211_AMPDU_TX_STOP_CONT:
 		mtxq->aggr = false;
@@ -824,6 +844,59 @@ int mt7615_stop_sched_scan(struct ieee80211_hw *hw,
 }
 EXPORT_SYMBOL_GPL(mt7615_stop_sched_scan);
 
+static int __maybe_unused mt7615_suspend(struct ieee80211_hw *hw,
+					 struct cfg80211_wowlan *wowlan)
+{
+	struct mt7615_dev *dev = mt7615_hw_dev(hw);
+	struct mt7615_phy *phy = mt7615_hw_phy(hw);
+
+	clear_bit(MT76_STATE_RUNNING, &phy->mt76->state);
+	cancel_delayed_work_sync(&phy->scan_work);
+	cancel_delayed_work_sync(&dev->mt76.mac_work);
+
+	mutex_lock(&dev->mt76.mutex);
+
+	tasklet_kill(&dev->mt76.tx_tasklet);
+	if (!mt7615_dev_running(dev))
+		mt76_dma_cleanup(&dev->mt76);
+
+	mutex_unlock(&dev->mt76.mutex);
+
+	return 0;
+}
+
+static int __maybe_unused mt7615_resume(struct ieee80211_hw *hw)
+{
+	struct mt7615_dev *dev = mt7615_hw_dev(hw);
+
+	mutex_lock(&dev->mt76.mutex);
+#if 0 /* disable for symbol cycle reference */
+	if (!mt7615_dev_running(dev)) {
+		int err;
+
+		err = mt76_init_queues(dev);
+		if (err < 0)
+			return err;
+
+		netif_tx_napi_add(&dev->mt76.napi_dev, &dev->mt76.tx_napi,
+				  mt7615_poll_tx, NAPI_POLL_WEIGHT);
+		napi_enable(&dev->mt76.tx_napi);
+	}
+#endif
+	mutex_unlock(&dev->mt76.mutex);
+
+	return mt7615_start(hw);
+}
+
+static void __maybe_unused mt7615_set_wakeup(struct ieee80211_hw *hw,
+					     bool enabled)
+{
+	struct mt7615_dev *dev = mt7615_hw_dev(hw);
+	struct mt76_dev *mdev = &dev->mt76;
+
+	device_set_wakeup_enable(mdev->dev, enabled);
+}
+
 const struct ieee80211_ops mt7615_ops = {
 	.tx = mt7615_tx,
 	.start = mt7615_start,
@@ -857,6 +930,11 @@ const struct ieee80211_ops mt7615_ops = {
 	.cancel_hw_scan = mt7615_cancel_hw_scan,
 	.sched_scan_start = mt7615_start_sched_scan,
 	.sched_scan_stop = mt7615_stop_sched_scan,
+#ifdef CONFIG_PM
+	.suspend = mt7615_suspend,
+	.resume = mt7615_resume,
+	.set_wakeup = mt7615_set_wakeup,
+#endif /* CONFIG_PM */
 };
 EXPORT_SYMBOL_GPL(mt7615_ops);
 

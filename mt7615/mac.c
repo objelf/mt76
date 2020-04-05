@@ -945,7 +945,8 @@ void mt7615_mac_set_rates(struct mt7615_phy *phy, struct mt7615_sta *sta,
 	mt76_wr(dev, addr + 27 * 4, w27);
 
 	mt76_set(dev, MT_LPON_T0CR, MT_LPON_T0CR_MODE); /* TSF read */
-	sta->rate_set_tsf = (mt76_rr(dev, MT_LPON_UTTR0) & ~BIT(0)) | rd.rateset;
+	sta->rate_set_tsf = mt76_rr(dev, MT_LPON_UTTR0) & ~BIT(0);
+	sta->rate_set_tsf |= rd.rateset;
 
 	if (!(sta->wcid.tx_info & MT_WCID_TX_INFO_SET))
 		mt76_poll(dev, MT_WTBL_UPDATE, MT_WTBL_UPDATE_BUSY, 0, 5000);
@@ -1407,57 +1408,77 @@ void mt7615_queue_rx_skb(struct mt76_dev *mdev, enum mt76_rxq_id q,
 EXPORT_SYMBOL_GPL(mt7615_queue_rx_skb);
 
 static void
-mt7615_mac_set_default_sensitivity(struct mt7615_phy *phy)
+mt7615_mac_set_sensitivity(struct mt7615_phy *phy, int val, bool ofdm)
 {
 	struct mt7615_dev *dev = phy->dev;
 	bool ext_phy = phy != &dev->phy;
 
-	mt76_rmw(dev, MT_WF_PHY_MIN_PRI_PWR(ext_phy),
-		 MT_WF_PHY_PD_OFDM_MASK(ext_phy),
-		 MT_WF_PHY_PD_OFDM(ext_phy, 0x13c));
-	mt76_rmw(dev, MT_WF_PHY_RXTD_CCK_PD(ext_phy),
-		 MT_WF_PHY_PD_CCK_MASK(ext_phy),
-		 MT_WF_PHY_PD_CCK(ext_phy, 0x92));
+	if (is_mt7663(&dev->mt76)) {
+		if (ofdm)
+			mt76_rmw(dev, MT7663_WF_PHY_MIN_PRI_PWR(ext_phy),
+				 MT_WF_PHY_PD_OFDM_MASK(0),
+				 MT_WF_PHY_PD_OFDM(0, val));
+		else
+			mt76_rmw(dev, MT7663_WF_PHY_RXTD_CCK_PD(ext_phy),
+				 MT_WF_PHY_PD_CCK_MASK(ext_phy),
+				 MT_WF_PHY_PD_CCK(ext_phy, val));
+		return;
+	}
+
+	if (ofdm)
+		mt76_rmw(dev, MT_WF_PHY_MIN_PRI_PWR(ext_phy),
+			 MT_WF_PHY_PD_OFDM_MASK(ext_phy),
+			 MT_WF_PHY_PD_OFDM(ext_phy, val));
+	else
+		mt76_rmw(dev, MT_WF_PHY_RXTD_CCK_PD(ext_phy),
+			 MT_WF_PHY_PD_CCK_MASK(ext_phy),
+			 MT_WF_PHY_PD_CCK(ext_phy, val));
+}
+
+static void
+mt7615_mac_set_default_sensitivity(struct mt7615_phy *phy)
+{
+	/* ofdm */
+	mt7615_mac_set_sensitivity(phy, 0x13c, true);
+	/* cck */
+	mt7615_mac_set_sensitivity(phy, 0x92, false);
 
 	phy->ofdm_sensitivity = -98;
 	phy->cck_sensitivity = -110;
 	phy->last_cca_adj = jiffies;
 }
 
-void mt7615_mac_set_scs(struct mt7615_dev *dev, bool enable)
+void mt7615_mac_set_scs(struct mt7615_phy *phy, bool enable)
 {
-	struct mt7615_phy *ext_phy;
+	struct mt7615_dev *dev = phy->dev;
+	bool ext_phy = phy != &dev->phy;
+	u32 reg, mask;
 
 	mutex_lock(&dev->mt76.mutex);
 
-	if (dev->scs_en == enable)
+	if (phy->scs_en == enable)
 		goto out;
 
-	if (is_mt7663(&dev->mt76))
-		goto out;
+	if (is_mt7663(&dev->mt76)) {
+		reg = MT7663_WF_PHY_MIN_PRI_PWR(ext_phy);
+		mask = MT_WF_PHY_PD_BLK(0);
+	} else {
+		reg = MT_WF_PHY_MIN_PRI_PWR(ext_phy);
+		mask = MT_WF_PHY_PD_BLK(ext_phy);
+	}
 
 	if (enable) {
-		mt76_set(dev, MT_WF_PHY_MIN_PRI_PWR(0),
-			 MT_WF_PHY_PD_BLK(0));
-		mt76_set(dev, MT_WF_PHY_MIN_PRI_PWR(1),
-			 MT_WF_PHY_PD_BLK(1));
+		mt76_set(dev, reg, mask);
 		if (is_mt7622(&dev->mt76)) {
 			mt76_set(dev, MT_MIB_M0_MISC_CR, 0x7 << 8);
 			mt76_set(dev, MT_MIB_M0_MISC_CR, 0x7);
 		}
 	} else {
-		mt76_clear(dev, MT_WF_PHY_MIN_PRI_PWR(0),
-			   MT_WF_PHY_PD_BLK(0));
-		mt76_clear(dev, MT_WF_PHY_MIN_PRI_PWR(1),
-			   MT_WF_PHY_PD_BLK(1));
+		mt76_clear(dev, reg, mask);
 	}
 
-	mt7615_mac_set_default_sensitivity(&dev->phy);
-	ext_phy = mt7615_ext_phy(dev);
-	if (ext_phy)
-		mt7615_mac_set_default_sensitivity(ext_phy);
-
-	dev->scs_en = enable;
+	mt7615_mac_set_default_sensitivity(phy);
+	phy->scs_en = enable;
 
 out:
 	mutex_unlock(&dev->mt76.mutex);
@@ -1465,10 +1486,12 @@ out:
 
 void mt7615_mac_enable_nf(struct mt7615_dev *dev, bool ext_phy)
 {
-	u32 rxtd;
+	u32 rxtd, reg;
 
 	if (is_mt7663(&dev->mt76))
-		return;
+		reg = MT7663_WF_PHY_R0_PHYMUX_5;
+	else
+		reg = MT_WF_PHY_R0_PHYMUX_5(ext_phy);
 
 	if (ext_phy)
 		rxtd = MT_WF_PHY_RXTD2(10);
@@ -1476,15 +1499,21 @@ void mt7615_mac_enable_nf(struct mt7615_dev *dev, bool ext_phy)
 		rxtd = MT_WF_PHY_RXTD(12);
 
 	mt76_set(dev, rxtd, BIT(18) | BIT(29));
-	mt76_set(dev, MT_WF_PHY_R0_PHYMUX_5(ext_phy), 0x5 << 12);
+	mt76_set(dev, reg, 0x5 << 12);
 }
 
 void mt7615_mac_cca_stats_reset(struct mt7615_phy *phy)
 {
 	struct mt7615_dev *dev = phy->dev;
 	bool ext_phy = phy != &dev->phy;
-	u32 reg = MT_WF_PHY_R0_PHYMUX_5(ext_phy);
+	u32 reg;
 
+	if (is_mt7663(&dev->mt76))
+		reg = MT7663_WF_PHY_R0_PHYMUX_5;
+	else
+		reg = MT_WF_PHY_R0_PHYMUX_5(ext_phy);
+
+	/* reset PD and MDRDY counters */
 	mt76_clear(dev, reg, GENMASK(22, 20));
 	mt76_set(dev, reg, BIT(22) | BIT(20));
 }
@@ -1536,20 +1565,9 @@ mt7615_mac_adjust_sensitivity(struct mt7615_phy *phy,
 	}
 
 	if (update) {
-		u16 val;
+		u16 val = ofdm ? *sensitivity * 2 + 512 : *sensitivity + 256;
 
-		if (ofdm) {
-			val = *sensitivity * 2 + 512;
-			mt76_rmw(dev, MT_WF_PHY_MIN_PRI_PWR(ext_phy),
-				 MT_WF_PHY_PD_OFDM_MASK(ext_phy),
-				 MT_WF_PHY_PD_OFDM(ext_phy, val));
-		} else {
-			val = *sensitivity + 256;
-			if (!ext_phy)
-			mt76_rmw(dev, MT_WF_PHY_RXTD_CCK_PD(ext_phy),
-				 MT_WF_PHY_PD_CCK_MASK(ext_phy),
-				 MT_WF_PHY_PD_CCK(ext_phy, val));
-		}
+		mt7615_mac_set_sensitivity(phy, val, ofdm);
 		phy->last_cca_adj = jiffies;
 	}
 }
@@ -1563,14 +1581,20 @@ mt7615_mac_scs_check(struct mt7615_phy *phy)
 	u32 mdrdy_cck, mdrdy_ofdm, pd_cck, pd_ofdm;
 	bool ext_phy = phy != &dev->phy;
 
-	if (!dev->scs_en)
+	if (!phy->scs_en)
 		return;
 
-	val = mt76_rr(dev, MT_WF_PHY_R0_PHYCTRL_STS0(ext_phy));
+	if (is_mt7663(&dev->mt76))
+		val = mt76_rr(dev, MT7663_WF_PHY_R0_PHYCTRL_STS0(ext_phy));
+	else
+		val = mt76_rr(dev, MT_WF_PHY_R0_PHYCTRL_STS0(ext_phy));
 	pd_cck = FIELD_GET(MT_WF_PHYCTRL_STAT_PD_CCK, val);
 	pd_ofdm = FIELD_GET(MT_WF_PHYCTRL_STAT_PD_OFDM, val);
 
-	val = mt76_rr(dev, MT_WF_PHY_R0_PHYCTRL_STS5(ext_phy));
+	if (is_mt7663(&dev->mt76))
+		val = mt76_rr(dev, MT7663_WF_PHY_R0_PHYCTRL_STS5(ext_phy));
+	else
+		val = mt76_rr(dev, MT_WF_PHY_R0_PHYCTRL_STS5(ext_phy));
 	mdrdy_cck = FIELD_GET(MT_WF_PHYCTRL_STAT_MDRDY_CCK, val);
 	mdrdy_ofdm = FIELD_GET(MT_WF_PHYCTRL_STAT_MDRDY_OFDM, val);
 
@@ -1595,9 +1619,13 @@ static u8
 mt7615_phy_get_nf(struct mt7615_dev *dev, int idx)
 {
 	static const u8 nf_power[] = { 92, 89, 86, 83, 80, 75, 70, 65, 60, 55, 52 };
-	u32 reg = idx ? MT_WF_PHY_RXTD2(17) : MT_WF_PHY_RXTD(20);
-	u32 val, sum = 0, n = 0;
+	u32 reg, val, sum = 0, n = 0;
 	int i;
+
+	if (is_mt7663(&dev->mt76))
+		reg = MT7663_WF_PHY_RXTD(20);
+	else
+		reg = idx ? MT_WF_PHY_RXTD2(17) : MT_WF_PHY_RXTD(20);
 
 	for (i = 0; i < ARRAY_SIZE(nf_power); i++, reg += 4) {
 		val = mt76_rr(dev, reg);

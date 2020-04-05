@@ -344,12 +344,7 @@ mt7615_mcu_scan_event(struct mt7615_dev *dev, struct sk_buff *skb)
 static void
 mt7615_mcu_bss_event(struct mt7615_dev *dev, struct sk_buff *skb)
 {
-	struct mt7615_mcu_bss_event {
-		u8 bss_idx;
-		u8 is_absent;
-		u8 free_quota;
-		u8 pad;
-	} __packed *event;
+	struct mt7615_mcu_bss_event *event;
 	struct mt76_phy *mphy;
 
 	event = (struct mt7615_mcu_bss_event *)(skb->data +
@@ -1827,6 +1822,15 @@ mt7615_mcu_send_ram_firmware(struct mt7615_dev *dev,
 	return 0;
 }
 
+static const struct wiphy_wowlan_support mt7615_wowlan_support = {
+	.flags = WIPHY_WOWLAN_MAGIC_PKT | WIPHY_WOWLAN_DISCONNECT |
+		 WIPHY_WOWLAN_SUPPORTS_GTK_REKEY |
+		 WIPHY_WOWLAN_GTK_REKEY_FAILURE,
+	.n_patterns = 1,
+	.pattern_min_len = 1,
+	.pattern_max_len = MT7615_WOW_PATTEN_MAX_LEN,
+};
+
 static int mt7615_load_n9(struct mt7615_dev *dev, const char *name)
 {
 	const struct mt7615_fw_trailer *hdr;
@@ -2113,6 +2117,10 @@ int __mt7663_load_firmware(struct mt7615_dev *dev)
 		dev_err(dev->mt76.dev, "Timeout for initializing firmware\n");
 		return -EIO;
 	}
+
+#ifdef CONFIG_PM
+	dev->mt76.hw->wiphy->wowlan = &mt7615_wowlan_support;
+#endif /* CONFIG_PM */
 
 	dev_dbg(dev->mt76.dev, "Firmware init done\n");
 
@@ -2600,7 +2608,7 @@ int mt7615_mcu_set_channel_domain(struct mt7615_phy *phy)
 	struct mt76_phy *mphy = phy->mt76;
 	struct mt7615_dev *dev = phy->dev;
 	struct mt7615_mcu_channel_domain {
-		__le32 contry_code; /* regulatory_request.alpha2 */
+		__le32 country_code; /* regulatory_request.alpha2 */
 		u8 bw_2g; /* BW_20_40M		0
 			   * BW_20M		1
 			   * BW_20_40_80M	2
@@ -2846,4 +2854,128 @@ int mt7615_mcu_sched_scan_enable(struct mt7615_phy *phy,
 
 	return __mt76_mcu_send_msg(&dev->mt76, MCU_CMD_SCHED_SCAN_ENABLE,
 				   &req, sizeof(req), false);
+}
+
+int mt7615_mcu_set_wow_ctrl(struct mt7615_dev *dev,
+			    struct ieee80211_vif *vif,
+			    u8 cmd, u8 trigger, u8 waked_by)
+{
+	struct mt7615_vif *mvif = (struct mt7615_vif *)vif->drv_priv;
+	struct {
+		struct {
+			u8 bss_idx;
+			u8 pad[3];
+		} __packed hdr;
+		struct mt7615_wow_ctrl_tlv wow_ctrl_tlv;
+	} req = {
+		.hdr = {
+			.bss_idx = mvif->idx,
+		},
+		.wow_ctrl_tlv = {
+			.tag = cpu_to_le16(UNI_SUSPEND_WOW_CTRL),
+			.len = cpu_to_le16(sizeof(struct mt7615_wow_ctrl_tlv)),
+			.cmd = cmd,
+			.trigger = trigger,
+			.wakeup_hif = mt76_is_usb(&dev->mt76) ? 1 : 2,
+		},
+	};
+
+	return __mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD_SUSPEND,
+				   &req, sizeof(req), true);
+}
+
+int mt7615_mcu_set_wow_pattern(struct mt7615_dev *dev,
+			       struct ieee80211_vif *vif,
+			       u8 index, bool enable,
+			       struct cfg80211_pkt_pattern *pkt_pattern)
+{
+	struct mt7615_vif *mvif = (struct mt7615_vif *)vif->drv_priv;
+	struct mt7615_wow_pattern_tlv *ptlv;
+	struct sk_buff *skb;
+	struct req_hdr {
+		u8 bss_idx;
+		u8 pad[3];
+	} __packed hdr = {
+		.bss_idx = mvif->idx,
+	};
+
+	skb = mt76_mcu_msg_alloc(&dev->mt76, NULL,
+				 sizeof(hdr) + sizeof(*ptlv));
+	if (!skb)
+		return -ENOMEM;
+
+	skb_put_data(skb, &hdr, sizeof(hdr));
+	ptlv = (struct mt7615_wow_pattern_tlv *)skb_put(skb, sizeof(*ptlv));
+	ptlv->tag = cpu_to_le16(UNI_SUSPEND_WOW_PATTERN);
+	ptlv->len = cpu_to_le16(sizeof(*ptlv));
+	ptlv->data_len = pkt_pattern->pattern_len;
+	ptlv->enable = enable;
+	ptlv->index = index;
+
+	memcpy(ptlv->pattern, pkt_pattern->pattern, pkt_pattern->pattern_len);
+	memcpy(ptlv->mask, pkt_pattern->mask, pkt_pattern->pattern_len / 8);
+
+	return __mt76_mcu_skb_send_msg(&dev->mt76, skb,
+				       MCU_UNI_CMD_SUSPEND, true);
+}
+
+int mt7615_mcu_set_suspend_mode(struct mt7615_dev *dev,
+				struct ieee80211_vif *vif,
+				bool enanble, u8 mdtim, bool wow_suspend)
+{
+	struct mt7615_vif *mvif = (struct mt7615_vif *)vif->drv_priv;
+	struct {
+		struct {
+			u8 bss_idx;
+			u8 pad[3];
+		} __packed hdr;
+		struct mt7615_suspend_tlv suspend_tlv;
+	} req = {
+		.hdr = {
+			.bss_idx = mvif->idx,
+		},
+		.suspend_tlv = {
+			.tag = cpu_to_le16(UNI_SUSPEND_MODE_SETTING),
+			.len = cpu_to_le16(sizeof(struct mt7615_suspend_tlv)),
+			.enable = enanble,
+			.mdtim = mdtim,
+			.wow_suspend = wow_suspend,
+		},
+	};
+
+	return __mt76_mcu_send_msg(&dev->mt76, MCU_UNI_CMD_SUSPEND,
+				   &req, sizeof(req), true);
+}
+
+int mt7615_mcu_set_gtk_rekey(struct mt7615_dev *dev,
+			     struct ieee80211_vif *vif,
+			     struct cfg80211_gtk_rekey_data *key)
+{
+	struct mt7615_vif *mvif = (struct mt7615_vif *)vif->drv_priv;
+	struct mt7615_gtk_rekey_tlv *gtk_tlv;
+	struct sk_buff *skb;
+	struct {
+		u8 bss_idx;
+		u8 pad[3];
+	} __packed hdr = {
+		.bss_idx = mvif->idx,
+	};
+
+	skb = mt76_mcu_msg_alloc(&dev->mt76, NULL,
+				 sizeof(hdr) + sizeof(*gtk_tlv));
+	if (!skb)
+		return -ENOMEM;
+
+	skb_put_data(skb, &hdr, sizeof(hdr));
+	gtk_tlv = (struct mt7615_gtk_rekey_tlv *)skb_put(skb,
+							 sizeof(*gtk_tlv));
+	gtk_tlv->tag = cpu_to_le16(UNI_OFFLOAD_OFFLOAD_GTK_REKEY);
+	gtk_tlv->len = cpu_to_le16(sizeof(*gtk_tlv));
+
+	memcpy(gtk_tlv->kek, key->kek, NL80211_KEK_LEN);
+	memcpy(gtk_tlv->kck, key->kck, NL80211_KCK_LEN);
+	memcpy(gtk_tlv->replay_ctr, key->replay_ctr, NL80211_REPLAY_CTR_LEN);
+
+	return __mt76_mcu_skb_send_msg(&dev->mt76, skb,
+				       MCU_UNI_CMD_OFFLOAD, true);
 }

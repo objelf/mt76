@@ -169,6 +169,8 @@ struct mt7615_phy {
 
 	u16 noise;
 
+	bool scs_en;
+
 	unsigned long last_cca_adj;
 	int false_cca_ofdm, false_cca_cck;
 	s8 ofdm_sensitivity;
@@ -253,7 +255,6 @@ struct mt7615_dev {
 	u32 hw_pattern;
 
 	u8 mac_work_count;
-	bool scs_en;
 	bool fw_debug;
 
 	spinlock_t token_lock;
@@ -472,7 +473,7 @@ void mt7615_update_channel(struct mt76_dev *mdev);
 bool mt7615_mac_wtbl_update(struct mt7615_dev *dev, int idx, u32 mask);
 void mt7615_mac_reset_counters(struct mt7615_dev *dev);
 void mt7615_mac_cca_stats_reset(struct mt7615_phy *phy);
-void mt7615_mac_set_scs(struct mt7615_dev *dev, bool enable);
+void mt7615_mac_set_scs(struct mt7615_phy *phy, bool enable);
 void mt7615_mac_enable_nf(struct mt7615_dev *dev, bool ext_phy);
 void mt7615_mac_sta_poll(struct mt7615_dev *dev);
 int mt7615_mac_write_txwi(struct mt7615_dev *dev, __le32 *txwi,
@@ -549,6 +550,20 @@ int mt7615_dfs_init_radar_detector(struct mt7615_phy *phy);
 
 int mt7615_init_debugfs(struct mt7615_dev *dev);
 int mt7615_mcu_wait_response(struct mt7615_dev *dev, int cmd, int seq);
+
+int mt7615_mcu_set_wow_ctrl(struct mt7615_dev *dev,
+			    struct ieee80211_vif *vif,
+			    u8 cmd, u8 trigger, u8 waked_by);
+int mt7615_mcu_set_wow_pattern(struct mt7615_dev *dev,
+			       struct ieee80211_vif *vif,
+			       u8 index, bool enable,
+			       struct cfg80211_pkt_pattern *pkt_pattern);
+int mt7615_mcu_set_suspend_mode(struct mt7615_dev *dev,
+				struct ieee80211_vif *vif,
+				bool enanble, u8 mdtim, bool wow_suspend);
+int mt7615_mcu_set_gtk_rekey(struct mt7615_dev *dev,
+			     struct ieee80211_vif *vif,
+			     struct cfg80211_gtk_rekey_data *key);
 
 int __mt7663_load_firmware(struct mt7615_dev *dev);
 

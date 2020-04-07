@@ -287,6 +287,12 @@ static const struct ieee80211_ops mt7663_usb_ops = {
 	.cancel_hw_scan = mt7615_cancel_hw_scan,
 	.sched_scan_start = mt7615_start_sched_scan,
 	.sched_scan_stop = mt7615_stop_sched_scan,
+#ifdef CONFIG_PM
+	.suspend = mt7615_suspend,
+	.resume = mt7615_resume,
+	.set_wakeup = mt7615_set_wakeup,
+	.set_rekey_data = mt7615_set_rekey_data,
+#endif /* CONFIG_PM */
 };
 
 static int
@@ -393,17 +399,31 @@ static void mt7663u_disconnect(struct usb_interface *usb_intf)
 	ieee80211_free_hw(dev->mt76.hw);
 }
 
-static int __maybe_unused
-mt7663u_suspend(struct usb_interface *intf,
-		pm_message_t state)
+static int __maybe_unused mt7663u_suspend(struct usb_interface *intf,
+					  pm_message_t state)
 {
+	struct mt7615_dev *dev = usb_get_intfdata(intf);
+
+	mt76u_stop_rx(&dev->mt76);
+
+	mt76u_stop_tx(&dev->mt76);
+	tasklet_kill(&dev->mt76.tx_tasklet);
+
 	return 0;
 }
 
-static int __maybe_unused
-mt7663u_resume(struct usb_interface *intf)
+static int __maybe_unused mt7663u_resume(struct usb_interface *intf)
 {
-	return 0;
+	struct mt7615_dev *dev = usb_get_intfdata(intf);
+	int err;
+
+	err = mt76u_vendor_request(&dev->mt76, MT_VEND_FEATURE_SET,
+				   USB_DIR_OUT | USB_TYPE_VENDOR,
+				   0x5, 0x0, NULL, 0);
+	if (err)
+		return err;
+
+	return mt76u_resume_rx(&dev->mt76);
 }
 
 MODULE_DEVICE_TABLE(usb, mt7615_device_table);

@@ -10,7 +10,6 @@
 #include <linux/etherdevice.h>
 #include <linux/module.h>
 #include "mt7615.h"
-#include "../dma.h"
 #include "mcu.h"
 
 static bool mt7615_dev_running(struct mt7615_dev *dev)
@@ -255,6 +254,11 @@ static int mt7615_set_channel(struct mt7615_phy *phy)
 
 	mt7615_init_dfs_state(phy);
 	mt76_set_channel(phy->mt76);
+
+	if (is_mt7615(&dev->mt76) && dev->flash_eeprom) {
+		mt7615_mcu_apply_rx_dcoc(phy);
+		mt7615_mcu_apply_tx_dpd(phy);
+	}
 
 	ret = mt7615_mcu_set_chan_info(phy, MCU_EXT_CMD_CHANNEL_SWITCH);
 	if (ret)
@@ -661,7 +665,7 @@ int mt7615_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		break;
 	case IEEE80211_AMPDU_TX_START:
 		mtxq->agg_ssn = IEEE80211_SN_TO_SEQ(ssn);
-        ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
+		ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
 		break;
 	case IEEE80211_AMPDU_TX_STOP_CONT:
 		mtxq->aggr = false;
@@ -844,58 +848,90 @@ int mt7615_stop_sched_scan(struct ieee80211_hw *hw,
 }
 EXPORT_SYMBOL_GPL(mt7615_stop_sched_scan);
 
-static int __maybe_unused mt7615_suspend(struct ieee80211_hw *hw,
-					 struct cfg80211_wowlan *wowlan)
+int __maybe_unused mt7615_suspend(struct ieee80211_hw *hw,
+				  struct cfg80211_wowlan *wowlan)
 {
 	struct mt7615_dev *dev = mt7615_hw_dev(hw);
 	struct mt7615_phy *phy = mt7615_hw_phy(hw);
+	bool ext_phy = phy != &dev->phy;
+	int err = 0;
+
+	mutex_lock(&dev->mt76.mutex);
 
 	clear_bit(MT76_STATE_RUNNING, &phy->mt76->state);
 	cancel_delayed_work_sync(&phy->scan_work);
+	mt76_set(dev, MT_WF_RFCR(ext_phy), MT_WF_RFCR_DROP_OTHER_BEACON);
+	if (mt7615_dev_running(dev))
+		goto out;
+
+	set_bit(MT76_STATE_SUSPEND, &phy->mt76->state);
 	cancel_delayed_work_sync(&dev->mt76.mac_work);
 
-	mutex_lock(&dev->mt76.mutex);
+	ieee80211_iterate_active_interfaces(hw,
+					    IEEE80211_IFACE_ITER_RESUME_ALL,
+					    mt7615_mcu_set_suspend_iter, phy);
 
-	tasklet_kill(&dev->mt76.tx_tasklet);
-	if (!mt7615_dev_running(dev))
-		mt76_dma_cleanup(&dev->mt76);
-
+	err = mt7615_mcu_set_hif_suspend(dev, true);
+out:
 	mutex_unlock(&dev->mt76.mutex);
 
-	return 0;
+	return err;
 }
+EXPORT_SYMBOL_GPL(mt7615_suspend);
 
-static int __maybe_unused mt7615_resume(struct ieee80211_hw *hw)
+int __maybe_unused mt7615_resume(struct ieee80211_hw *hw)
 {
 	struct mt7615_dev *dev = mt7615_hw_dev(hw);
+	struct mt7615_phy *phy = mt7615_hw_phy(hw);
+	bool running, ext_phy = phy != &dev->phy;
+	int err = 0;
 
 	mutex_lock(&dev->mt76.mutex);
-#if 0 /* disable for symbol cycle reference */
-	if (!mt7615_dev_running(dev)) {
-		int err;
 
-		err = mt76_init_queues(dev);
-		if (err < 0)
-			return err;
+	running = mt7615_dev_running(dev);
+	mt76_clear(dev, MT_WF_RFCR(ext_phy), MT_WF_RFCR_DROP_OTHER_BEACON);
+	set_bit(MT76_STATE_RUNNING, &phy->mt76->state);
+	if (running)
+		goto out;
 
-		netif_tx_napi_add(&dev->mt76.napi_dev, &dev->mt76.tx_napi,
-				  mt7615_poll_tx, NAPI_POLL_WEIGHT);
-		napi_enable(&dev->mt76.tx_napi);
-	}
-#endif
+	err = mt7615_mcu_set_hif_suspend(dev, false);
+	if (err < 0)
+		goto out;
+
+	clear_bit(MT76_STATE_SUSPEND, &phy->mt76->state);
+	ieee80211_iterate_active_interfaces(hw,
+					    IEEE80211_IFACE_ITER_RESUME_ALL,
+					    mt7615_mcu_set_suspend_iter, phy);
+
+	ieee80211_queue_delayed_work(hw, &dev->mt76.mac_work,
+				     MT7615_WATCHDOG_TIME);
+out:
 	mutex_unlock(&dev->mt76.mutex);
 
-	return mt7615_start(hw);
+	return err;
 }
+EXPORT_SYMBOL_GPL(mt7615_resume);
 
-static void __maybe_unused mt7615_set_wakeup(struct ieee80211_hw *hw,
-					     bool enabled)
+void __maybe_unused mt7615_set_wakeup(struct ieee80211_hw *hw,
+				      bool enabled)
 {
 	struct mt7615_dev *dev = mt7615_hw_dev(hw);
 	struct mt76_dev *mdev = &dev->mt76;
 
 	device_set_wakeup_enable(mdev->dev, enabled);
 }
+EXPORT_SYMBOL_GPL(mt7615_set_wakeup);
+
+void __maybe_unused
+mt7615_set_rekey_data(struct ieee80211_hw *hw,
+		      struct ieee80211_vif *vif,
+		      struct cfg80211_gtk_rekey_data *data)
+{
+	struct mt7615_dev *dev = mt7615_hw_dev(hw);
+
+	mt7615_mcu_set_gtk_rekey(dev, vif, data);
+}
+EXPORT_SYMBOL_GPL(mt7615_set_rekey_data);
 
 const struct ieee80211_ops mt7615_ops = {
 	.tx = mt7615_tx,
@@ -934,6 +970,7 @@ const struct ieee80211_ops mt7615_ops = {
 	.suspend = mt7615_suspend,
 	.resume = mt7615_resume,
 	.set_wakeup = mt7615_set_wakeup,
+	.set_rekey_data = mt7615_set_rekey_data,
 #endif /* CONFIG_PM */
 };
 EXPORT_SYMBOL_GPL(mt7615_ops);

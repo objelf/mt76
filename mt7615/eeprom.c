@@ -5,6 +5,7 @@
  *         Felix Fietkau <nbd@nbd.name>
  */
 
+#include <linux/of.h>
 #include "mt7615.h"
 #include "eeprom.h"
 
@@ -71,7 +72,8 @@ static int mt7615_eeprom_load(struct mt7615_dev *dev, u32 addr)
 {
 	int ret;
 
-	ret = mt76_eeprom_init(&dev->mt76, MT7615_EEPROM_SIZE);
+	ret = mt76_eeprom_init(&dev->mt76, MT7615_EEPROM_SIZE +
+					   MT7615_EEPROM_EXTRA_DATA);
 	if (ret < 0)
 		return ret;
 
@@ -98,7 +100,7 @@ mt7615_eeprom_parse_hw_band_cap(struct mt7615_dev *dev)
 
 	if (is_mt7663(&dev->mt76)) {
 		/* dual band */
-		dev->mt76.cap.has_2ghz = false;
+		dev->mt76.cap.has_2ghz = true;
 		dev->mt76.cap.has_5ghz = true;
 		return;
 	}
@@ -255,6 +257,11 @@ static void mt7622_apply_cal_free_data(struct mt7615_dev *dev)
 
 static void mt7615_cal_free_data(struct mt7615_dev *dev)
 {
+	struct device_node *np = dev->mt76.dev->of_node;
+
+	if (!np || !of_property_read_bool(np, "mediatek,eeprom-merge-otp"))
+		return;
+
 	switch (mt76_chip(&dev->mt76)) {
 	case 0x7622:
 		mt7622_apply_cal_free_data(dev);
@@ -274,11 +281,13 @@ int mt7615_eeprom_init(struct mt7615_dev *dev, u32 addr)
 		return ret;
 
 	ret = mt7615_check_eeprom(&dev->mt76);
-	if (ret && dev->mt76.otp.data)
+	if (ret && dev->mt76.otp.data) {
 		memcpy(dev->mt76.eeprom.data, dev->mt76.otp.data,
 		       MT7615_EEPROM_SIZE);
-	else
+	} else {
+		dev->flash_eeprom = true;
 		mt7615_cal_free_data(dev);
+	}
 
 	mt7615_eeprom_parse_hw_cap(dev);
 	memcpy(dev->mt76.macaddr, dev->mt76.eeprom.data + MT_EE_MAC_ADDR,

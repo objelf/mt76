@@ -41,7 +41,7 @@
 #define MT7615_FIRMWARE_V2		2
 #define MT7615_FIRMWARE_V3		3
 
-#define MT7663_ROM_PATCH		"mediatek/mt7663pr2h_v3.bin"
+#define MT7663_ROM_PATCH		"mediatek/mt7663pr2h.bin"
 #define MT7663_FIRMWARE_N9              "mediatek/mt7663_n9_v3.bin"
 
 #define MT7615_EEPROM_SIZE		1024
@@ -154,10 +154,12 @@ struct mt7615_vif {
 };
 
 struct mib_stats {
-	u32 ack_fail_cnt;
-	u32 fcs_err_cnt;
-	u32 rts_cnt;
-	u32 rts_retries_cnt;
+	u16 ack_fail_cnt;
+	u16 fcs_err_cnt;
+	u16 rts_cnt;
+	u16 rts_retries_cnt;
+	u16 ba_miss_cnt;
+	unsigned long aggr_per;
 };
 
 struct mt7615_phy {
@@ -256,6 +258,7 @@ struct mt7615_dev {
 
 	u8 mac_work_count;
 	bool fw_debug;
+	bool flash_eeprom;
 
 	spinlock_t token_lock;
 	struct idr token;
@@ -427,6 +430,9 @@ int mt7615_start_sched_scan(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 			    struct ieee80211_scan_ies *ies);
 int mt7615_stop_sched_scan(struct ieee80211_hw *hw,
 			   struct ieee80211_vif *vif);
+int mt7615_mcu_get_mib_info(struct mt7615_phy *phy, struct sk_buff **skb);
+int mt7615_mcu_get_wtbl_info(struct mt7615_dev *dev, int index,
+			     struct sk_buff **skb);
 void mt7615_tx(struct ieee80211_hw *hw,
 	       struct ieee80211_tx_control *control,
 	       struct sk_buff *skb);
@@ -502,6 +508,12 @@ void mt7615_mac_reset_work(struct work_struct *work);
 int mt7615_mcu_wait_response(struct mt7615_dev *dev, int cmd, int seq);
 int mt7615_mcu_msg_send(struct mt76_dev *mdev, int cmd, const void *data,
 			int len, bool wait_resp);
+int mt7615_mcu_msg_send_rsp(struct mt76_dev *mdev, int cmd, const void *data,
+			    int len, struct sk_buff **resp);
+int mt7615_mcu_send_message(struct mt76_dev *mdev, struct sk_buff *skb,
+			    int cmd, bool wait_resp);
+int mt7615_mcu_send_message_rsp(struct mt76_dev *mdev, struct sk_buff *skb,
+				int cmd, struct sk_buff **resp);
 int mt7615_mcu_set_dbdc(struct mt7615_dev *dev);
 int mt7615_mcu_set_eeprom(struct mt7615_dev *dev);
 int mt7615_mcu_set_mac_enable(struct mt7615_dev *dev, int band, bool enable);
@@ -546,21 +558,22 @@ int mt7615_mcu_set_pulse_th(struct mt7615_dev *dev,
 int mt7615_mcu_set_radar_th(struct mt7615_dev *dev, int index,
 			    const struct mt7615_dfs_pattern *pattern);
 int mt7615_mcu_set_sku_en(struct mt7615_phy *phy, bool enable);
+int mt7615_mcu_apply_rx_dcoc(struct mt7615_phy *phy);
+int mt7615_mcu_apply_tx_dpd(struct mt7615_phy *phy);
 int mt7615_dfs_init_radar_detector(struct mt7615_phy *phy);
 
 int mt7615_init_debugfs(struct mt7615_dev *dev);
 int mt7615_mcu_wait_response(struct mt7615_dev *dev, int cmd, int seq);
 
-int mt7615_mcu_set_wow_ctrl(struct mt7615_dev *dev,
-			    struct ieee80211_vif *vif,
-			    u8 cmd, u8 trigger, u8 waked_by);
-int mt7615_mcu_set_wow_pattern(struct mt7615_dev *dev,
-			       struct ieee80211_vif *vif,
-			       u8 index, bool enable,
-			       struct cfg80211_pkt_pattern *pkt_pattern);
-int mt7615_mcu_set_suspend_mode(struct mt7615_dev *dev,
-				struct ieee80211_vif *vif,
-				bool enanble, u8 mdtim, bool wow_suspend);
+int mt7615_mcu_set_hif_suspend(struct mt7615_dev *dev, bool suspend);
+int mt7615_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan);
+void mt7615_set_wakeup(struct ieee80211_hw *hw, bool enabled);
+void mt7615_set_rekey_data(struct ieee80211_hw *hw,
+			   struct ieee80211_vif *vif,
+			   struct cfg80211_gtk_rekey_data *data);
+int mt7615_resume(struct ieee80211_hw *hw);
+void mt7615_mcu_set_suspend_iter(void *priv, u8 *mac,
+				 struct ieee80211_vif *vif);
 int mt7615_mcu_set_gtk_rekey(struct mt7615_dev *dev,
 			     struct ieee80211_vif *vif,
 			     struct cfg80211_gtk_rekey_data *key);

@@ -572,6 +572,8 @@ void mt7615_set_rekey_data(struct ieee80211_hw *hw,
 			   struct ieee80211_vif *vif,
 			   struct cfg80211_gtk_rekey_data *data);
 int mt7615_resume(struct ieee80211_hw *hw);
+void mt7615_mcu_set_wowlan_iter(void *priv, u8 *mac,
+				struct ieee80211_vif *vif);
 void mt7615_mcu_set_suspend_iter(void *priv, u8 *mac,
 				 struct ieee80211_vif *vif);
 int mt7615_mcu_set_gtk_rekey(struct mt7615_dev *dev,

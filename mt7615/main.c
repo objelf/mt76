@@ -864,14 +864,13 @@ int __maybe_unused mt7615_suspend(struct ieee80211_hw *hw,
 	if (mt7615_dev_running(dev))
 		goto out;
 
-	set_bit(MT76_STATE_SUSPEND, &phy->mt76->state);
+	set_bit(MT76_STATE_WOWLAN, &phy->mt76->state);
 	cancel_delayed_work_sync(&dev->mt76.mac_work);
 
 	ieee80211_iterate_active_interfaces(hw,
 					    IEEE80211_IFACE_ITER_RESUME_ALL,
-					    mt7615_mcu_set_suspend_iter, phy);
+					    mt7615_mcu_set_wowlan_iter, phy);
 
-	err = mt7615_mcu_set_hif_suspend(dev, true);
 out:
 	mutex_unlock(&dev->mt76.mutex);
 
@@ -894,14 +893,10 @@ int __maybe_unused mt7615_resume(struct ieee80211_hw *hw)
 	if (running)
 		goto out;
 
-	err = mt7615_mcu_set_hif_suspend(dev, false);
-	if (err < 0)
-		goto out;
-
-	clear_bit(MT76_STATE_SUSPEND, &phy->mt76->state);
+	clear_bit(MT76_STATE_WOWLAN, &phy->mt76->state);
 	ieee80211_iterate_active_interfaces(hw,
 					    IEEE80211_IFACE_ITER_RESUME_ALL,
-					    mt7615_mcu_set_suspend_iter, phy);
+					    mt7615_mcu_set_wowlan_iter, phy);
 
 	ieee80211_queue_delayed_work(hw, &dev->mt76.mac_work,
 				     MT7615_WATCHDOG_TIME);

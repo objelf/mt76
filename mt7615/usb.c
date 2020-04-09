@@ -403,6 +403,21 @@ static int __maybe_unused mt7663u_suspend(struct usb_interface *intf,
 					  pm_message_t state)
 {
 	struct mt7615_dev *dev = usb_get_intfdata(intf);
+	struct mt7615_phy *phy = &dev->phy;
+	struct mt7615_phy *ext_phy = mt7615_ext_phy(dev);
+
+	set_bit(MT76_STATE_SUSPEND, &phy->mt76->state);
+	ieee80211_iterate_active_interfaces(phy->mt76->hw,
+					    IEEE80211_IFACE_ITER_RESUME_ALL,
+					    mt7615_mcu_set_suspend_iter, phy);
+	if (ext_phy) {
+		set_bit(MT76_STATE_SUSPEND, &phy->mt76->state);
+		ieee80211_iterate_active_interfaces(ext_phy->mt76->hw,
+					    IEEE80211_IFACE_ITER_RESUME_ALL,
+					    mt7615_mcu_set_suspend_iter, ext_phy);
+	}
+
+	mt7615_mcu_set_hif_suspend(dev, true);
 
 	mt76u_stop_rx(&dev->mt76);
 
@@ -415,6 +430,8 @@ static int __maybe_unused mt7663u_suspend(struct usb_interface *intf,
 static int __maybe_unused mt7663u_resume(struct usb_interface *intf)
 {
 	struct mt7615_dev *dev = usb_get_intfdata(intf);
+	struct mt7615_phy *phy = &dev->phy;
+	struct mt7615_phy *ext_phy = mt7615_ext_phy(dev);
 	int err;
 
 	err = mt76u_vendor_request(&dev->mt76, MT_VEND_FEATURE_SET,
@@ -423,7 +440,25 @@ static int __maybe_unused mt7663u_resume(struct usb_interface *intf)
 	if (err)
 		return err;
 
-	return mt76u_resume_rx(&dev->mt76);
+	mt76u_resume_rx(&dev->mt76);
+
+	err = mt7615_mcu_set_hif_suspend(dev, false);
+	if (err)
+		return err;
+
+	clear_bit(MT76_STATE_SUSPEND, &phy->mt76->state);
+	ieee80211_iterate_active_interfaces(phy->mt76->hw,
+					    IEEE80211_IFACE_ITER_RESUME_ALL,
+					    mt7615_mcu_set_suspend_iter, phy);
+
+	if (ext_phy) {
+		clear_bit(MT76_STATE_SUSPEND, &phy->mt76->state);
+		ieee80211_iterate_active_interfaces(ext_phy->mt76->hw,
+						    IEEE80211_IFACE_ITER_RESUME_ALL,
+						    mt7615_mcu_set_suspend_iter, ext_phy);
+	}
+
+	return 0;
 }
 
 MODULE_DEVICE_TABLE(usb, mt7615_device_table);

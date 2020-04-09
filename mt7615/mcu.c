@@ -3316,18 +3316,17 @@ mt7615_mcu_set_wow_ctrl(struct mt7615_dev *dev, struct ieee80211_vif *vif,
 		.wow_ctrl_tlv = {
 			.tag = cpu_to_le16(UNI_SUSPEND_WOW_CTRL),
 			.len = cpu_to_le16(sizeof(struct mt7615_wow_ctrl_tlv)),
-			.cmd = suspend ? 1 : 3,
+			.cmd = suspend ? 1 : 2,
 		},
 	};
 
+	/* Currently firmware just supports magic packet, disconnect and
+	 * beacon loss.
+	 */
 	if (wowlan->magic_pkt)
 		req.wow_ctrl_tlv.trigger |= BIT(0);
-	if (wowlan->any)
-		req.wow_ctrl_tlv.trigger |= BIT(1);
 	if (wowlan->disconnect)
 		req.wow_ctrl_tlv.trigger |= BIT(2);
-	if (wowlan->gtk_rekey_failure)
-		req.wow_ctrl_tlv.trigger |= BIT(3);
 
 	if (mt76_is_mmio(&dev->mt76))
 		req.wow_ctrl_tlv.wakeup_hif = 2;
@@ -3403,24 +3402,34 @@ mt7615_mcu_set_suspend_mode(struct mt7615_dev *dev,
 				   &req, sizeof(req), true);
 }
 
-void mt7615_mcu_set_suspend_iter(void *priv, u8 *mac,
-				 struct ieee80211_vif *vif)
+void mt7615_mcu_set_wowlan_iter(void *priv, u8 *mac,
+				struct ieee80211_vif *vif)
 {
 	struct mt7615_phy *phy = priv;
-	bool suspend = test_bit(MT76_STATE_SUSPEND, &phy->mt76->state);
+	bool suspend = test_bit(MT76_STATE_WOWLAN, &phy->mt76->state);
 	struct ieee80211_hw *hw = phy->mt76->hw;
 	struct cfg80211_wowlan *wowlan = hw->wiphy->wowlan_config;
 	int i;
 
 	mt7615_mcu_set_bss_pm(phy->dev, vif, suspend);
 
-	mt7615_mcu_set_suspend_mode(phy->dev, vif, suspend, 0, 0);
+	mt7615_mcu_set_suspend_mode(phy->dev, vif, suspend, 1, true);
 
 	for (i = 0; i < wowlan->n_patterns; i++)
 		mt7615_mcu_set_wow_pattern(phy->dev, vif, i, suspend,
 					   &wowlan->patterns[i]);
 	mt7615_mcu_set_wow_ctrl(phy->dev, vif, suspend, wowlan);
 }
+
+void mt7615_mcu_set_suspend_iter(void *priv, u8 *mac,
+				struct ieee80211_vif *vif)
+{
+	struct mt7615_phy *phy = priv;
+	bool suspend = test_bit(MT76_STATE_SUSPEND, &phy->mt76->state);
+
+	mt7615_mcu_set_suspend_mode(phy->dev, vif, suspend, 0, false);
+}
+EXPORT_SYMBOL_GPL(mt7615_mcu_set_suspend_iter);
 
 int mt7615_mcu_set_gtk_rekey(struct mt7615_dev *dev,
 			     struct ieee80211_vif *vif,

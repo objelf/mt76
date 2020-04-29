@@ -12,8 +12,9 @@
 
 #define MT7615_MAX_INTERFACES		4
 #define MT7615_MAX_WMM_SETS		4
+#define MT7663_WTBL_SIZE                32
 #define MT7615_WTBL_SIZE		128
-#define MT7615_WTBL_RESERVED		(MT7615_WTBL_SIZE - 1)
+#define MT7615_WTBL_RESERVED           (mt7615_wtbl_size(dev) - 1)
 #define MT7615_WTBL_STA			(MT7615_WTBL_RESERVED - \
 					 MT7615_MAX_INTERFACES)
 
@@ -424,6 +425,14 @@ static inline bool mt7615_firmware_offload(struct mt7615_dev *dev)
 	return dev->fw_ver > MT7615_FIRMWARE_V2;
 }
 
+static inline u16 mt7615_wtbl_size(struct mt7615_dev *dev)
+{
+       if (is_mt7663(&dev->mt76) && mt7615_firmware_offload(dev))
+               return MT7663_WTBL_SIZE;
+       else
+               return MT7615_WTBL_SIZE;
+}
+
 void mt7615_scan_work(struct work_struct *work);
 void mt7615_ps_work(struct work_struct *work);
 void mt7615_init_txpower(struct mt7615_dev *dev,
@@ -520,11 +529,13 @@ int mt7615_mcu_wait_response(struct mt7615_dev *dev, int cmd, int seq);
 int mt7615_mcu_set_hif_suspend(struct mt7615_dev *dev, bool suspend);
 void mt7615_mcu_set_suspend_iter(void *priv, u8 *mac,
 				 struct ieee80211_vif *vif);
-int mt7615_mcu_set_gtk_rekey(struct ieee80211_hw *hw,
-			     struct ieee80211_vif *vif,
-			     struct cfg80211_gtk_rekey_data *key);
+int mt7615_mcu_update_gtk_rekey(struct ieee80211_hw *hw,
+                               struct ieee80211_vif *vif,
+                               struct cfg80211_gtk_rekey_data *key);
 
 int __mt7663_load_firmware(struct mt7615_dev *dev);
+int mt7615_firmware_own(struct mt7615_dev *dev);
+int mt7615_driver_own(struct mt7615_dev *dev);
 
 /* usb */
 void mt7663u_wtbl_work(struct work_struct *work);

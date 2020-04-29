@@ -465,22 +465,24 @@ struct mt7615_suspend_tlv {
 } __packed;
 
 struct mt7615_gtk_rekey_tlv {
-	__le16 tag;
-	__le16 len;
-	u8 kek[NL80211_KEK_LEN];
-	u8 kck[NL80211_KCK_LEN];
-	u8 replay_ctr[NL80211_REPLAY_CTR_LEN];
-	u8 rekey_mode; /* 0: rekey offload enable
-			* 1: rekey offload disable
-			*/
-	u8 keyid;
-	u8 pad[2];
-	__le32 proto; /* WPA-RSN-WAPI-OPSN */
-	__le32 pairwise_cipher;
-	__le32 group_cipher;
-	__le32 key_mgmt; /* NONE-PSK-IEEE802.1X */
-	__le32 mgmt_group_cipher;
-	u8 reserverd[4];
+       __le16 tag;
+       __le16 len;
+       u8 kek[NL80211_KEK_LEN];
+       u8 kck[NL80211_KCK_LEN];
+       u8 replay_ctr[NL80211_REPLAY_CTR_LEN];
+       u8 rekey_mode; /* 0: rekey offload enable
+                       * 1: rekey offload disable
+                       * 2: rekey update
+                       */
+       u8 keyid;
+       u8 pad[2];
+       __le32 proto; /* WPA-RSN-WAPI-OPSN */
+       __le32 pairwise_cipher;
+       __le32 group_cipher;
+       __le32 key_mgmt; /* NONE-PSK-IEEE802.1X */
+       __le32 mgmt_group_cipher;
+       u8 option; /* 1: rekey data update without enabling offload */
+       u8 reserverd[3];
 } __packed;
 
 /* offload mcu commands */

@@ -943,7 +943,7 @@ mt7615_set_rekey_data(struct ieee80211_hw *hw,
 		      struct ieee80211_vif *vif,
 		      struct cfg80211_gtk_rekey_data *data)
 {
-	mt7615_mcu_set_gtk_rekey(hw, vif, data);
+	mt7615_mcu_update_gtk_rekey(hw, vif, data);
 }
 
 const struct ieee80211_ops mt7615_ops = {

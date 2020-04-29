@@ -60,7 +60,7 @@ static int __maybe_unused mt7615_pci_suspend(struct pci_dev *pdev,
 {
 	struct mt76_dev *mdev = pci_get_drvdata(pdev);
 	struct mt7615_dev *dev = container_of(mdev, struct mt7615_dev, mt76);
-	int i;
+	int i, err;
 
 	if (!test_bit(MT76_STATE_SUSPEND, &dev->mphy.state) &&
 	    mt7615_firmware_offload(dev)) {
@@ -82,14 +82,75 @@ static int __maybe_unused mt7615_pci_suspend(struct pci_dev *pdev,
 	}
 	tasklet_kill(&dev->irq_tasklet);
 
+	err = -EIO;
+
+	if (!mt76_poll_msec(dev, MT_PDMA_BUSY_STATUS, MT_PDMA_TX_IDX_BUSY, 0, 1000)) {
+		dev_err(dev->mt76.dev, "PDMA Tx Busy\n");
+		goto restore;
+	}
+
+	if (!mt76_poll_msec(dev, MT_PLE_PG_INFO, MT_PLE_SRC_CNT, 0, 1000)) {
+		dev_err(dev->mt76.dev, "PSE Busy\n");
+		goto restore;
+	}
+
+	if (!mt76_poll_msec(dev, MT_PDMA_BUSY_STATUS, MT_PDMA_BUSY, 0, 1000)) {
+		dev_err(dev->mt76.dev, "PDMA busy\n");
+		goto restore;
+	}
+
+	mt76_rmw(dev, MT_PDMA_SLP_PROT, MT_PDMA_AXI_SLPPROT_ENABLE, 1);
+
+	if (!mt76_poll_msec(dev, MT_PDMA_SLP_PROT, MT_PDMA_AXI_SLPPROT_RDY,
+			    MT_PDMA_AXI_SLPPROT_RDY, 1000)) {
+		dev_err(dev->mt76.dev, "PDMA sleep pretection not ready\n");
+		goto restore;
+	}
+
+	pci_enable_wake(pdev, pci_choose_state(pdev, state), 1);
+	pci_save_state(pdev);
+	pci_set_power_state(pdev, pci_choose_state(pdev, state));
+
+	mt7615_firmware_own(dev);
+
 	return 0;
+
+restore:
+	for (i = 0; i < ARRAY_SIZE(mdev->q_rx); i++)
+		napi_enable(&mdev->napi[i]);
+
+	napi_enable(&mdev->tx_napi);
+
+	if (!test_bit(MT76_STATE_SUSPEND, &dev->mphy.state) &&
+	    mt7615_firmware_offload(dev))
+		mt7615_mcu_set_hif_suspend(dev, false);
+
+	return err;
 }
 
 static int __maybe_unused mt7615_pci_resume(struct pci_dev *pdev)
 {
 	struct mt76_dev *mdev = pci_get_drvdata(pdev);
 	struct mt7615_dev *dev = container_of(mdev, struct mt7615_dev, mt76);
+	bool pdma_reset;
 	int i, err = 0;
+
+	mt7615_driver_own(dev);
+
+	pci_set_power_state(pdev, PCI_D0);
+	pci_restore_state(pdev);
+
+	mt76_rmw(dev, MT_PDMA_SLP_PROT, MT_PDMA_AXI_SLPPROT_ENABLE, 0);
+
+	pdma_reset = !mt76_rr(dev, MT_WPDMA_TX_RING0_CTRL0) &&
+		      !mt76_rr(dev, MT_WPDMA_TX_RING0_CTRL1);
+	if (pdma_reset) {
+		/* TODO */
+		dev_err(dev->mt76.dev, "PDMA have to reinitialization\n");
+	}
+
+        if (is_mt7663(&dev->mt76))
+                mt76_wr(dev, MT_PCIE_IRQ_ENABLE, 1);
 
 	for (i = 0; i < ARRAY_SIZE(mdev->q_rx); i++)
 		napi_enable(&mdev->napi[i]);

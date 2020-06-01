@@ -100,7 +100,7 @@ mt7615_eeprom_parse_hw_band_cap(struct mt7615_dev *dev)
 
 	if (is_mt7663(&dev->mt76)) {
 		/* dual band */
-		dev->mt76.cap.has_2ghz = true;
+		dev->mt76.cap.has_2ghz = false;
 		dev->mt76.cap.has_5ghz = true;
 		return;
 	}

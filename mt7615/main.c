@@ -398,6 +398,7 @@ mt7615_conf_tx(struct ieee80211_hw *hw, struct ieee80211_vif *vif, u16 queue,
 	struct mt7615_vif *mvif = (struct mt7615_vif *)vif->drv_priv;
 	struct mt7615_dev *dev = mt7615_hw_dev(hw);
 
+	queue = mt7615_lmac_mapping(dev, queue);
 	queue += mvif->wmm_idx * MT7615_MAX_WMM_SETS;
 
 	return mt7615_mcu_set_wmm(dev, queue, params);
@@ -659,6 +660,9 @@ mt7615_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		mtxq->aggr = true;
 		mtxq->send_bar = false;
 		mt7615_mcu_add_tx_ba(dev, params, true);
+		ssn = mt7615_mac_get_sta_tid_sn(dev, msta->wcid.idx, tid);
+		ieee80211_send_bar(vif, sta->addr, tid,
+				   IEEE80211_SN_TO_SEQ(ssn));
 		break;
 	case IEEE80211_AMPDU_TX_STOP_FLUSH:
 	case IEEE80211_AMPDU_TX_STOP_FLUSH_CONT:
@@ -666,6 +670,8 @@ mt7615_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		mt7615_mcu_add_tx_ba(dev, params, false);
 		break;
 	case IEEE80211_AMPDU_TX_START:
+		ssn = mt7615_mac_get_sta_tid_sn(dev, msta->wcid.idx, tid);
+		params->ssn = ssn;
 		mtxq->agg_ssn = IEEE80211_SN_TO_SEQ(ssn);
 		ieee80211_start_tx_ba_cb_irqsafe(vif, sta->addr, tid);
 		break;

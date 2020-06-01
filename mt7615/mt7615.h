@@ -282,6 +282,21 @@ struct mt7615_dev {
 	struct list_head wd_head;
 };
 
+enum tx_pkt_queue_idx {
+   MT_LMAC_AC00,
+   MT_LMAC_AC01,
+   MT_LMAC_AC02,
+   MT_LMAC_AC03,
+   MT_LMAC_ALTX0 = 0x10,
+   MT_LMAC_BMC0,
+   MT_LMAC_BCN0,
+   MT_LMAC_PSMP0,
+   MT_LMAC_ALTX1,
+   MT_LMAC_BMC1,
+   MT_LMAC_BCN1,
+   MT_LMAC_PSMP1,
+};
+
 enum {
 	HW_BSSID_0 = 0x0,
 	HW_BSSID_1,
@@ -442,10 +457,28 @@ static inline u16 mt7615_wtbl_size(struct mt7615_dev *dev)
 		return MT7615_WTBL_SIZE;
 }
 
+static inline u8 mt7615_lmac_mapping(struct mt7615_dev *dev, u8 ac)
+{
+   static const u8 lmac_queue_map[] = {
+       [IEEE80211_AC_BK] = MT_LMAC_AC00,
+       [IEEE80211_AC_BE] = MT_LMAC_AC01,
+       [IEEE80211_AC_VI] = MT_LMAC_AC02,
+       [IEEE80211_AC_VO] = MT_LMAC_AC03,
+   };
+
+   if (WARN_ON_ONCE(ac >= ARRAY_SIZE(lmac_queue_map)))
+       return MT_LMAC_AC01; /* BE */
+
+   return lmac_queue_map[ac];
+}
+
 void mt7615_dma_reset(struct mt7615_dev *dev);
 void mt7615_scan_work(struct work_struct *work);
 void mt7615_roc_work(struct work_struct *work);
 void mt7615_roc_timer(struct timer_list *timer);
+int mt7615_mcu_get_mib_info(struct mt7615_phy *phy, struct sk_buff **skb);
+int mt7615_mcu_get_wtbl_info(struct mt7615_dev *dev, int index,
+			     struct sk_buff **skb);
 void mt7615_init_txpower(struct mt7615_dev *dev,
 			 struct ieee80211_supported_band *sband);
 void mt7615_phy_init(struct mt7615_dev *dev);
@@ -481,10 +514,17 @@ int mt7615_mac_wtbl_update_key(struct mt7615_dev *dev,
 			       enum mt7615_cipher_type cipher,
 			       enum set_key_cmd cmd);
 void mt7615_mac_reset_work(struct work_struct *work);
+u32 mt7615_mac_get_sta_tid_sn(struct mt7615_dev *dev, int wcid, u8 tid);
 
 int mt7615_mcu_wait_response(struct mt7615_dev *dev, int cmd, int seq);
 int mt7615_mcu_msg_send(struct mt76_dev *mdev, int cmd, const void *data,
 			int len, bool wait_resp);
+int mt7615_mcu_msg_send_rsp(struct mt76_dev *mdev, int cmd, const void *data,
+			    int len, struct sk_buff **resp);
+int mt7615_mcu_send_message(struct mt76_dev *mdev, struct sk_buff *skb,
+			    int cmd, bool wait_resp);
+int mt7615_mcu_send_message_rsp(struct mt76_dev *mdev, struct sk_buff *skb,
+				int cmd, struct sk_buff **resp);
 int mt7615_mcu_set_dbdc(struct mt7615_dev *dev);
 int mt7615_mcu_set_eeprom(struct mt7615_dev *dev);
 int mt7615_mcu_set_mac_enable(struct mt7615_dev *dev, int band, bool enable);

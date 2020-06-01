@@ -543,6 +543,179 @@ struct mt7615_roc_tlv {
 	u8 rsv1[8];
 } __packed;
 
+struct mt7615_mcu_mib_info {
+	/* mib 1 */
+	__le32 rx_fcs_err_cnt;
+	__le32 rx_fifo_full_cnt;
+	__le32 rx_mpdu_cnt;
+	__le32 rx_ampducnt;
+	__le32 rx_total_byte;
+	__le32 rx_valid_ampdusf;
+	__le32 rx_valid_byte;
+	__le32 channel_idle_cnt;
+	__le32 rx_vector_drop_cnt;
+	__le32 delimiter_failed_cnt;
+	__le32 rx_vector_mismatch_cnt;
+	__le32 mdrdy_cnt;
+	__le32 cckmdrdy_cnt;
+	__le32 ofdmlgmix_mdrdy;
+	__le32 ofdmgreen_mdrdy;
+	__le32 pfdrop_cnt;
+	__le32 rx_len_mismatch_cnt;
+	__le32 pcca_time;
+	__le32 scca_time;
+	__le32 cca_nav_tx;
+	__le32 pedtime;
+	__le32 beacon_tx_cnt;
+	__le32 ba_missed_cnt[4];
+	__le32 rts_tx_cnt[4];
+	__le32 frame_retry_cnt[4];
+	__le32 frame_retry2cnt[4];
+	__le32 rts_retry_cnt[4];
+	__le32 ack_failed_cnt[4];
+	/* mib 2 */
+	__le32 tx40mhz_cnt;
+	__le32 tx80mhz_cnt;
+	__le32 tx160mhz_cnt;
+	/* ampdu metric */
+	__le32 tx_sf_cnt;
+	__le32 tx_ack_sf_cnt;
+	__le32 tx_ampdu_cnt;
+	__le32 tx_rsp_ba_cnt;
+	__le16 tx_early_stop_cnt;
+	__le16 tx_range1ampdu_cnt;
+	__le16 tx_range2ampdu_cnt;
+	__le16 tx_range3ampdu_cnt;
+	__le16 tx_range4ampdu_cnt;
+	__le16 tx_range5ampdu_cnt;
+	__le16 tx_range6ampdu_cnt;
+	__le16 tx_range7ampdu_cnt;
+	__le16 tx_range8ampdu_cnt;
+	__le16 tx_range9ampdu_cnt;
+} __packed;
+
+struct mt7615_mcu_wtbl_info {
+	/* tx config */
+	u8 pa[6];
+	u8 sw;
+	u8 dis_rx_hdrtran;
+	u8 aadom;
+	u8 pfmu_idx;
+	__le16 partial_aid;
+	u8 tibf;
+	u8 tebf;
+	u8 is_ht;
+	u8 is_vht;
+	u8 mesh;
+	u8 baf_en;
+	u8 cfack;
+	u8 rdg_ba;
+	u8 rdg;
+	u8 is_pwrmgt;
+	u8 rts;
+	u8 smps;
+	u8 txop_ps;
+	u8 donot_update_ipsm;
+	u8 skip_tx;
+	u8 ldpc;
+	u8 is_qos;
+	u8 is_fromds;
+	u8 is_tods;
+	u8 dyn_bw;
+	u8 is_amsdu_cross_lg;
+	u8 check_per;
+	u8 is_gid63;
+	u8 reserved1[1];
+	u8 vht_tibf;
+	u8 vht_tebf;
+	u8 vht_ldpc;
+	u8 reserved2[1];
+
+	/* sec config */
+	u8 wpi_flag;
+	u8 rv;
+	u8 ikv;
+	u8 rkv;
+	u8 rcid;
+	u8 rca1;
+	u8 rca2;
+	u8 even_pn;
+	u8 key_id;
+	u8 muar_idx;
+	u8 cipher_suit;
+	u8 reserved3[1];
+
+	/* key config */
+	__le32 key0;
+	__le32 key1;
+	__le32 key2;
+	__le32 key3;
+	__le32 key4;
+	__le32 key5;
+	__le32 key6;
+	__le32 key7;
+
+	/* peer rate info */
+	u8 counter_mpdu_fail;
+	u8 counter_mpdu_tx;
+	u8 rate_idx;
+	u8 reserved4[1];
+	__le16 rate_code0;
+	__le16 rate_code1;
+	__le16 rate_code2;
+	__le16 rate_code3;
+	__le16 rate_code4;
+	__le16 rate_code5;
+	__le16 rate_code6;
+	__le16 rate_code7;
+
+	/* peer ba info */
+	u8 ba_en;
+	u8 reserved5[3];
+	__le32 ba_win_size;
+
+	/* peer cap info */
+	u8 ant_id_sts0;
+	u8 ant_id_sts1;
+	u8 ant_id_sts2;
+	u8 ant_id_sts3;
+	u8 tx_power_offset;
+	u8 counter_bw_selector;
+	u8 change_bw_after_raten;
+	u8 frequency_capability;
+	u8 spatial_extension_index;
+	u8 g2;
+	u8 g4;
+	u8 g8;
+	u8 g16;
+	u8 mmss;
+	u8 ampdu_factor;
+	u8 reserved6[1];
+
+	/* peer rx counter info */
+	u8 rx_rcpi0;
+	u8 rx_rcpi1;
+	u8 rx_rcpi2;
+	u8 rx_rcpi3;
+	u8 rx_cc0;
+	u8 rx_cc1;
+	u8 rx_cc2;
+	u8 rx_cc3;
+	u8 rx_cc_sel;
+	u8 cermsd;
+	u8 reserved7[2];
+
+	/* peer tx counter info */
+	__le16 rate1_tx_cnt;
+	__le16 rate1_fail_cnt;
+	__le16 rate2_ok_cnt;
+	__le16 rate3_ok_cnt;
+	__le16 cur_bw_tx_cnt;
+	__le16 cur_bw_fail_cnt;
+	__le16 other_bw_tx_cnt;
+	__le16 other_bw_fail_cnt;
+} __packed;
+
 /* offload mcu commands */
 enum {
 	MCU_CMD_START_HW_SCAN = MCU_CE_PREFIX | 0x03,
@@ -555,6 +728,8 @@ enum {
 	MCU_CMD_SET_P2P_OPPPS = MCU_CE_PREFIX | 0x33,
 	MCU_CMD_SCHED_SCAN_ENABLE = MCU_CE_PREFIX | 0x61,
 	MCU_CMD_SCHED_SCAN_REQ = MCU_CE_PREFIX | 0x62,
+	MCU_CMD_GET_WTBL_INFO = MCU_CE_PREFIX | 0xcd,
+	MCU_CMD_GET_MIB_INFO = MCU_CE_PREFIX | 0xce,
 };
 
 #define MCU_CMD_ACK		BIT(0)

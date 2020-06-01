@@ -1,0 +1,10 @@
+--- mt7615/mcu.h
++++ mt7615/mcu.h
+@@ -88,6 +88,7 @@
+ 	MCU_EVENT_CH_PRIVILEGE = 0x18,
+ 	MCU_EVENT_SCHED_SCAN_DONE = 0x23,
+ 	MCU_EVENT_DBG_MSG = 0x27,
++	MCU_EVENT_WTBL_INFO = 0xcd,
+ 	MCU_EVENT_MIB_INFO = 0xce,
+ 	MCU_EVENT_EXT = 0xed,
+ 	MCU_EVENT_RESTART_DL = 0xef,

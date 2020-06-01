@@ -146,6 +146,12 @@ struct mt76_mcu_ops {
 			    int len, bool wait_resp);
 	int (*mcu_skb_send_msg)(struct mt76_dev *dev, struct sk_buff *skb,
 				int cmd, bool wait_resp);
+	int (*mcu_skb_send_msg_bus)(struct mt76_dev *dev, struct sk_buff *skb,
+				    int cmd, int *wait_seq);
+	int (*mcu_send_msg_rsp)(struct mt76_dev *dev, int cmd, const void *data,
+				int len, struct sk_buff **resp);
+	int (*mcu_skb_send_msg_rsp)(struct mt76_dev *dev, struct sk_buff *skb,
+				    int cmd, struct sk_buff **resp);
 	int (*mcu_wr_rp)(struct mt76_dev *dev, u32 base,
 			 const struct mt76_reg_pair *rp, int len);
 	int (*mcu_rd_rp)(struct mt76_dev *dev, u32 base,
@@ -301,6 +307,7 @@ struct mt76_hw_cap {
 #define MT_DRV_TX_ALIGNED4_SKBS		BIT(1)
 #define MT_DRV_SW_RX_AIRTIME		BIT(2)
 #define MT_DRV_RX_DMA_HDR		BIT(3)
+#define MT_DRV_HW_MGMT_TXQ		BIT(4)
 
 struct mt76_driver_ops {
 	u32 drv_flags;
@@ -609,7 +616,10 @@ enum mt76_phy_type {
 #define mt76_mcu_send_msg(dev, ...)	(dev)->mt76.mcu_ops->mcu_send_msg(&((dev)->mt76), __VA_ARGS__)
 
 #define __mt76_mcu_send_msg(dev, ...)	(dev)->mcu_ops->mcu_send_msg((dev), __VA_ARGS__)
+#define __mt76_mcu_send_msg_rsp(dev, ...)	(dev)->mcu_ops->mcu_send_msg_rsp((dev), __VA_ARGS__)
 #define __mt76_mcu_skb_send_msg(dev, ...)	(dev)->mcu_ops->mcu_skb_send_msg((dev), __VA_ARGS__)
+#define __mt76_mcu_skb_send_msg_rsp(dev, ...)	(dev)->mcu_ops->mcu_skb_send_msg_rsp((dev), __VA_ARGS__)
+#define __mt76_mcu_skb_send_msg_bus(dev, ...)	(dev)->mcu_ops->mcu_skb_send_msg_bus((dev), __VA_ARGS__)
 #define mt76_mcu_restart(dev, ...)	(dev)->mt76.mcu_ops->mcu_restart(&((dev)->mt76))
 #define __mt76_mcu_restart(dev, ...)	(dev)->mcu_ops->mcu_restart((dev))
 
@@ -670,6 +680,10 @@ static inline u16 mt76_rev(struct mt76_dev *dev)
 #define mt76_queue_rx_reset(dev, ...)	(dev)->mt76.queue_ops->rx_reset(&((dev)->mt76), __VA_ARGS__)
 #define mt76_queue_tx_cleanup(dev, ...)	(dev)->mt76.queue_ops->tx_cleanup(&((dev)->mt76), __VA_ARGS__)
 #define mt76_queue_kick(dev, ...)	(dev)->mt76.queue_ops->kick(&((dev)->mt76), __VA_ARGS__)
+
+#define mt76_for_each_q_rx(dev, i)	\
+	for (i = 0; i < ARRAY_SIZE((dev)->q_rx) && \
+		    (dev)->q_rx[i].ndesc; i++)
 
 struct mt76_dev *mt76_alloc_device(struct device *pdev, unsigned int size,
 				   const struct ieee80211_ops *ops,

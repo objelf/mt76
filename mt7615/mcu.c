@@ -159,9 +159,10 @@ void mt7615_mcu_fill_msg(struct mt7615_dev *dev, struct sk_buff *skb,
 }
 EXPORT_SYMBOL_GPL(mt7615_mcu_fill_msg);
 
-static int __mt7615_mcu_msg_send(struct mt7615_dev *dev, struct sk_buff *skb,
-				 int cmd, int *wait_seq)
+static int mt7615_mcu_msg_send_mmio(struct mt76_dev *mdev, struct sk_buff *skb,
+				    int cmd, int *wait_seq)
 {
+	struct mt7615_dev *dev = container_of(mdev, struct mt7615_dev, mt76);
 	enum mt76_txq_id qid;
 
 	mt7615_mcu_fill_msg(dev, skb, cmd, wait_seq);
@@ -213,6 +214,33 @@ mt7615_mcu_parse_response(struct mt7615_dev *dev, int cmd,
 	return ret;
 }
 
+static int
+mt7615_mcu_get_response(struct mt7615_dev *dev, int cmd, int seq,
+			struct sk_buff **resp)
+{
+	unsigned long expires = jiffies + 2 * HZ;
+	struct mt7615_mcu_rxd *rxd;
+	struct sk_buff *skb;
+	int ret = 0;
+
+	skb = mt76_mcu_get_response(&dev->mt76, expires);
+	if (!skb) {
+		dev_err(dev->mt76.dev, "Message %ld (seq %d) timeout\n",
+			cmd & MCU_CMD_MASK, seq);
+		return -ETIMEDOUT;
+	}
+
+	rxd = (struct mt7615_mcu_rxd *)skb->data;
+	if (seq != rxd->seq)
+		return -EAGAIN;
+
+	/* Help caller remove the RxD header */
+	skb_pull(skb, sizeof(*rxd));
+	*resp = skb;
+
+	return ret;
+}
+
 int mt7615_mcu_wait_response(struct mt7615_dev *dev, int cmd, int seq)
 {
 	unsigned long expires = jiffies + 20 * HZ;
@@ -236,16 +264,15 @@ int mt7615_mcu_wait_response(struct mt7615_dev *dev, int cmd, int seq)
 }
 EXPORT_SYMBOL_GPL(mt7615_mcu_wait_response);
 
-static int
-mt7615_mcu_send_message(struct mt76_dev *mdev, struct sk_buff *skb,
-			int cmd, bool wait_resp)
+int mt7615_mcu_send_message(struct mt76_dev *mdev, struct sk_buff *skb,
+			    int cmd, bool wait_resp)
 {
 	struct mt7615_dev *dev = container_of(mdev, struct mt7615_dev, mt76);
 	int ret, seq;
 
 	mutex_lock(&mdev->mcu.mutex);
 
-	ret = __mt7615_mcu_msg_send(dev, skb, cmd, &seq);
+	ret = __mt76_mcu_skb_send_msg_bus(mdev, skb, cmd, &seq);
 	if (ret)
 		goto out;
 
@@ -257,6 +284,7 @@ out:
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(mt7615_mcu_send_message);
 
 int mt7615_mcu_msg_send(struct mt76_dev *mdev, int cmd, const void *data,
 			int len, bool wait_resp)
@@ -270,6 +298,40 @@ int mt7615_mcu_msg_send(struct mt76_dev *mdev, int cmd, const void *data,
 	return __mt76_mcu_skb_send_msg(mdev, skb, cmd, wait_resp);
 }
 EXPORT_SYMBOL_GPL(mt7615_mcu_msg_send);
+
+int
+mt7615_mcu_send_message_rsp(struct mt76_dev *mdev, struct sk_buff *skb,
+			    int cmd, struct sk_buff **resp)
+{
+	struct mt7615_dev *dev = container_of(mdev, struct mt7615_dev, mt76);
+	int ret, seq;
+
+	mutex_lock(&mdev->mcu.mutex);
+
+	ret = __mt76_mcu_skb_send_msg_bus(mdev, skb, cmd, &seq);
+	if (ret)
+		goto out;
+
+	ret = mt7615_mcu_get_response(dev, cmd, seq, resp);
+out:
+	mutex_unlock(&mdev->mcu.mutex);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mt7615_mcu_send_message_rsp);
+
+int mt7615_mcu_msg_send_rsp(struct mt76_dev *mdev, int cmd, const void *data,
+			    int len, struct sk_buff **resp)
+{
+	struct sk_buff *skb;
+
+	skb = mt76_mcu_msg_alloc(mdev, data, len);
+	if (!skb)
+		return -ENOMEM;
+
+	return __mt76_mcu_skb_send_msg_rsp(mdev, skb, cmd, resp);
+}
+EXPORT_SYMBOL_GPL(mt7615_mcu_msg_send_rsp);
 
 static void
 mt7615_mcu_csa_finish(void *priv, u8 *mac, struct ieee80211_vif *vif)
@@ -2322,8 +2384,11 @@ int mt7615_mcu_init(struct mt7615_dev *dev)
 {
 	static const struct mt76_mcu_ops mt7615_mcu_ops = {
 		.headroom = sizeof(struct mt7615_mcu_txd),
+		.mcu_skb_send_msg_bus = mt7615_mcu_msg_send_mmio,
 		.mcu_skb_send_msg = mt7615_mcu_send_message,
 		.mcu_send_msg = mt7615_mcu_msg_send,
+		.mcu_skb_send_msg_rsp = mt7615_mcu_send_message_rsp,
+		.mcu_send_msg_rsp = mt7615_mcu_msg_send_rsp,
 		.mcu_restart = mt7615_mcu_restart,
 	};
 	int ret;
@@ -2351,7 +2416,7 @@ int mt7615_mcu_init(struct mt7615_dev *dev)
 	mt76_queue_tx_cleanup(dev, MT_TXQ_FWDL, false);
 	dev_dbg(dev->mt76.dev, "Firmware init done\n");
 	set_bit(MT76_STATE_MCU_RUNNING, &dev->mphy.state);
-	mt7615_mcu_fw_log_2_host(dev, 0);
+	mt7615_mcu_fw_log_2_host(dev, 1);
 
 	return 0;
 }
@@ -3059,6 +3124,46 @@ int mt7615_mcu_sched_scan_enable(struct mt7615_phy *phy,
 
 	return __mt76_mcu_send_msg(&dev->mt76, MCU_CMD_SCHED_SCAN_ENABLE,
 				   &req, sizeof(req), false);
+}
+
+int mt7615_mcu_get_mib_info(struct mt7615_phy *phy, struct sk_buff **skb)
+{
+	struct mt7615_dev *dev = phy->dev;
+	struct {
+		u8 ext_phy;
+		u8 rsv[3];
+	} __packed req = {
+		.ext_phy = phy != &dev->phy,
+	};
+	int ret;
+
+	if (!mt7615_firmware_offload(dev))
+		return -ENOTSUPP;
+
+	ret = __mt76_mcu_send_msg_rsp(&dev->mt76, MCU_CMD_GET_MIB_INFO,
+				      &req, sizeof(req), skb);
+
+	return ret;
+}
+
+int mt7615_mcu_get_wtbl_info(struct mt7615_dev *dev, int index,
+			     struct sk_buff **skb)
+{
+	struct {
+		u8 index;
+		u8 rsv[3];
+	} __packed req = {
+		.index = index,
+	};
+	int ret;
+
+	if (!mt7615_firmware_offload(dev))
+		return -ENOTSUPP;
+
+	ret = __mt76_mcu_send_msg_rsp(&dev->mt76, MCU_CMD_GET_WTBL_INFO,
+				      &req, sizeof(req), skb);
+
+	return ret;
 }
 
 static int mt7615_find_freq_idx(const u16 *freqs, int n_freqs, u16 cur)

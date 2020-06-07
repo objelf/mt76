@@ -243,7 +243,7 @@ mt7615_mcu_send_message(struct mt76_dev *mdev, struct sk_buff *skb,
 	struct mt7615_dev *dev = container_of(mdev, struct mt7615_dev, mt76);
 	int ret, seq;
 
-	mutex_lock(&mdev->mcu.mutex);
+	mt7615_mutex_acquire(dev, &mdev->mcu.mutex);
 
 	ret = __mt7615_mcu_msg_send(dev, skb, cmd, &seq);
 	if (ret)
@@ -253,7 +253,7 @@ mt7615_mcu_send_message(struct mt76_dev *mdev, struct sk_buff *skb,
 		ret = mt7615_mcu_wait_response(dev, cmd, seq);
 
 out:
-	mutex_unlock(&mdev->mcu.mutex);
+	mt7615_mutex_release(dev, &mdev->mcu.mutex);
 
 	return ret;
 }
@@ -1901,6 +1901,7 @@ int mt7615_firmware_own(struct mt7615_dev *dev)
 
 out:
 	mt7622_trigger_hif_int(dev, false);
+	dev->pm.last_activity = jiffies;
 
 	return err;
 }

@@ -33,7 +33,7 @@ static int mt7615_start(struct ieee80211_hw *hw)
 	if (!mt7615_wait_for_mcu_init(dev))
 		return -EIO;
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 
 	running = mt7615_dev_running(dev);
 
@@ -60,7 +60,7 @@ static int mt7615_start(struct ieee80211_hw *hw)
 	if (!running)
 		mt7615_mac_reset_counters(dev);
 
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	return 0;
 }
@@ -76,7 +76,7 @@ static void mt7615_stop(struct ieee80211_hw *hw)
 
 	cancel_work_sync(&dev->pm.wake_work);
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 
 	clear_bit(MT76_STATE_RUNNING, &phy->mt76->state);
 	cancel_delayed_work_sync(&phy->scan_work);
@@ -91,7 +91,7 @@ static void mt7615_stop(struct ieee80211_hw *hw)
 		mt7615_mcu_set_mac_enable(dev, 0, false);
 	}
 
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 }
 
 static int get_omac_idx(enum nl80211_iftype type, u32 mask)
@@ -137,7 +137,7 @@ static int mt7615_add_interface(struct ieee80211_hw *hw,
 	bool ext_phy = phy != &dev->phy;
 	int idx, ret = 0;
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 
 	mvif->idx = ffs(~dev->vif_mask) - 1;
 	if (mvif->idx >= MT7615_MAX_INTERFACES) {
@@ -183,7 +183,7 @@ static int mt7615_add_interface(struct ieee80211_hw *hw,
 
 	ret = mt7615_mcu_add_dev_info(dev, vif, true);
 out:
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	return ret;
 }
@@ -205,11 +205,13 @@ static void mt7615_remove_interface(struct ieee80211_hw *hw,
 	if (vif->txq)
 		mt76_txq_remove(&dev->mt76, vif->txq);
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
+
 	dev->vif_mask &= ~BIT(mvif->idx);
 	dev->omac_mask &= ~BIT(mvif->omac_idx);
 	phy->omac_mask &= ~BIT(mvif->omac_idx);
-	mutex_unlock(&dev->mt76.mutex);
+
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	spin_lock_bh(&dev->sta_poll_lock);
 	if (!list_empty(&msta->poll_list))
@@ -244,7 +246,8 @@ static int mt7615_set_channel(struct mt7615_phy *phy)
 
 	cancel_delayed_work_sync(&phy->mac_work);
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
+
 	set_bit(MT76_RESET, &phy->mt76->state);
 
 	mt7615_init_dfs_state(phy);
@@ -270,7 +273,8 @@ static int mt7615_set_channel(struct mt7615_phy *phy)
 
 out:
 	clear_bit(MT76_RESET, &phy->mt76->state);
-	mutex_unlock(&dev->mt76.mutex);
+
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	mt76_txq_schedule_all(phy->mt76);
 	ieee80211_queue_delayed_work(phy->mt76->hw, &phy->mac_work,
@@ -376,7 +380,7 @@ static int mt7615_config(struct ieee80211_hw *hw, u32 changed)
 		ieee80211_wake_queues(hw);
 	}
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 
 	if (changed & IEEE80211_CONF_CHANGE_MONITOR) {
 		if (!(hw->conf.flags & IEEE80211_CONF_MONITOR))
@@ -387,7 +391,7 @@ static int mt7615_config(struct ieee80211_hw *hw, u32 changed)
 		mt76_wr(dev, MT_WF_RFCR(band), phy->rxfilter);
 	}
 
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	return ret;
 }
@@ -467,7 +471,7 @@ static void mt7615_bss_info_changed(struct ieee80211_hw *hw,
 	struct mt7615_dev *dev = mt7615_hw_dev(hw);
 	struct mt7615_phy *phy = mt7615_hw_phy(hw);
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 
 	if (changed & BSS_CHANGED_ERP_SLOT) {
 		int slottime = info->use_short_slot ? 9 : 20;
@@ -496,7 +500,7 @@ static void mt7615_bss_info_changed(struct ieee80211_hw *hw,
 	if (changed & BSS_CHANGED_ARP_FILTER)
 		mt7615_mcu_update_arp_filter(hw, vif, info);
 
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 }
 
 static void
@@ -506,9 +510,9 @@ mt7615_channel_switch_beacon(struct ieee80211_hw *hw,
 {
 	struct mt7615_dev *dev = mt7615_hw_dev(hw);
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 	mt7615_mcu_add_beacon(dev, hw, vif, true);
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 }
 
 int mt7615_mac_sta_add(struct mt76_dev *mdev, struct ieee80211_vif *vif,
@@ -624,9 +628,9 @@ static int mt7615_set_rts_threshold(struct ieee80211_hw *hw, u32 val)
 	struct mt7615_dev *dev = mt7615_hw_dev(hw);
 	struct mt7615_phy *phy = mt7615_hw_phy(hw);
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 	mt7615_mcu_set_rts_thresh(phy, val);
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	return 0;
 }
@@ -649,7 +653,8 @@ mt7615_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 
 	mtxq = (struct mt76_txq *)txq->drv_priv;
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
+
 	switch (action) {
 	case IEEE80211_AMPDU_RX_START:
 		mt76_rx_aggr_start(&dev->mt76, &msta->wcid, tid, ssn,
@@ -685,7 +690,7 @@ mt7615_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		ieee80211_stop_tx_ba_cb_irqsafe(vif, sta->addr, tid);
 		break;
 	}
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	return 0;
 }
@@ -730,13 +735,13 @@ mt7615_get_tsf(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
 		u32 t32[2];
 	} tsf;
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 
 	mt76_set(dev, MT_LPON_T0CR, MT_LPON_T0CR_MODE); /* TSF read */
 	tsf.t32[0] = mt76_rr(dev, MT_LPON_UTTR0);
 	tsf.t32[1] = mt76_rr(dev, MT_LPON_UTTR1);
 
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	return tsf.t64;
 }
@@ -747,10 +752,10 @@ mt7615_set_coverage_class(struct ieee80211_hw *hw, s16 coverage_class)
 	struct mt7615_phy *phy = mt7615_hw_phy(hw);
 	struct mt7615_dev *dev = phy->dev;
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 	phy->coverage_class = max_t(s16, coverage_class, 0);
 	mt7615_mac_set_timing(phy);
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 }
 
 static int
@@ -767,7 +772,7 @@ mt7615_set_antenna(struct ieee80211_hw *hw, u32 tx_ant, u32 rx_ant)
 	if ((BIT(hweight8(tx_ant)) - 1) != tx_ant)
 		tx_ant = BIT(ffs(tx_ant) - 1) - 1;
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 
 	phy->mt76->antenna_mask = tx_ant;
 	if (ext_phy) {
@@ -780,7 +785,7 @@ mt7615_set_antenna(struct ieee80211_hw *hw, u32 tx_ant, u32 rx_ant)
 
 	mt76_set_stream_caps(phy->mt76, true);
 
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	return 0;
 }
@@ -942,7 +947,7 @@ static int mt7615_suspend(struct ieee80211_hw *hw,
 	bool ext_phy = phy != &dev->phy;
 	int err = 0;
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 
 	clear_bit(MT76_STATE_RUNNING, &phy->mt76->state);
 	cancel_delayed_work_sync(&phy->scan_work);
@@ -958,7 +963,7 @@ static int mt7615_suspend(struct ieee80211_hw *hw,
 	if (!mt7615_dev_running(dev))
 		err = mt7615_mcu_set_hif_suspend(dev, true);
 
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	return err;
 }
@@ -969,7 +974,7 @@ static int mt7615_resume(struct ieee80211_hw *hw)
 	struct mt7615_phy *phy = mt7615_hw_phy(hw);
 	bool running, ext_phy = phy != &dev->phy;
 
-	mutex_lock(&dev->mt76.mutex);
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
 
 	running = mt7615_dev_running(dev);
 	set_bit(MT76_STATE_RUNNING, &phy->mt76->state);
@@ -979,7 +984,7 @@ static int mt7615_resume(struct ieee80211_hw *hw)
 
 		err = mt7615_mcu_set_hif_suspend(dev, false);
 		if (err < 0) {
-			mutex_unlock(&dev->mt76.mutex);
+			mt7615_mutex_release(dev, &dev->mt76.mutex);
 			return err;
 		}
 	}
@@ -993,7 +998,7 @@ static int mt7615_resume(struct ieee80211_hw *hw)
 				     MT7615_WATCHDOG_TIME);
 	mt76_clear(dev, MT_WF_RFCR(ext_phy), MT_WF_RFCR_DROP_OTHER_BEACON);
 
-	mutex_unlock(&dev->mt76.mutex);
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 
 	return 0;
 }

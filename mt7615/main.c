@@ -438,6 +438,8 @@ static void mt7615_configure_filter(struct ieee80211_hw *hw,
 		phy->rxfilter |= !(flags & FIF_##_flag) * (_hw);	\
 	} while (0)
 
+	mt7615_mutex_acquire(dev, &dev->mt76.mutex);
+
 	phy->rxfilter &= ~(MT_WF_RFCR_DROP_OTHER_BSS |
 			   MT_WF_RFCR_DROP_OTHER_BEACON |
 			   MT_WF_RFCR_DROP_FRAME_REPORT |
@@ -468,6 +470,8 @@ static void mt7615_configure_filter(struct ieee80211_hw *hw,
 		mt76_clear(dev, MT_WF_RFCR1(band), ctl_flags);
 	else
 		mt76_set(dev, MT_WF_RFCR1(band), ctl_flags);
+
+	mt7615_mutex_release(dev, &dev->mt76.mutex);
 }
 
 static void mt7615_bss_info_changed(struct ieee80211_hw *hw,

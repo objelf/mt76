@@ -299,6 +299,7 @@ struct mt7615_dev {
 		unsigned long last_activity;
 		unsigned long idle_timeout;
 	} pm;
+	int counter;
 };
 
 enum tx_pkt_queue_idx {

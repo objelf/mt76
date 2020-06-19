@@ -1864,6 +1864,9 @@ int mt7615_driver_own(struct mt7615_dev *dev)
 	write_addr = is_mt7663(mdev) ? MT_PCIE_DOORBELL_PUSH : MT_CFG_LPCR_HOST;
 	mt76_wr(dev, write_addr, MT_CFG_LPCR_HOST_DRV_OWN);
 
+	dev->counter++;
+	if (dev->counter != 1) printk("%s: unbalance drv_own [%d]\n", __func__, dev->counter);
+
 	if (!mt76_poll_msec(dev, read_addr, MT_CFG_LPCR_HOST_FW_OWN, 0, 3000)) {
 		dev_err(mdev->dev, "Timeout for driver own\n");
 		err = -EIO;
@@ -1893,6 +1896,10 @@ int mt7615_firmware_own(struct mt7615_dev *dev)
 		goto out;
 
 	mt76_wr(dev, addr, MT_CFG_LPCR_HOST_FW_OWN);
+
+	dev->counter--;
+	if (dev->counter != 0) printk("%s: unbalance fw_own [%d]\n", __func__, dev->counter);
+
 	if (!is_mt7615(&dev->mt76) &&
 	    !mt76_poll_msec(dev, addr, MT_CFG_LPCR_HOST_FW_OWN,
 			    MT_CFG_LPCR_HOST_FW_OWN, 3000)) {

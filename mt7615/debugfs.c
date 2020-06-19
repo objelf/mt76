@@ -365,6 +365,7 @@ int mt7615_init_debugfs(struct mt7615_dev *dev)
 	debugfs_create_devm_seqfile(dev->mt76.dev, "radio", dir,
 				    mt7615_radio_read);
 	debugfs_create_u32("dfs_hw_pattern", 0400, dir, &dev->hw_pattern);
+	debugfs_create_u32("counter", 0400, dir, &dev->counter);
 	/* test pattern knobs */
 	debugfs_create_u8("pattern_len", 0600, dir,
 			  &dev->radar_pattern.n_pulses);

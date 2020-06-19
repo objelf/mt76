@@ -1852,28 +1852,26 @@ int mt7615_driver_own(struct mt7615_dev *dev)
 {
 	struct mt76_phy *mphy = &dev->mt76.phy;
 	struct mt76_dev *mdev = &dev->mt76;
-	u32 read_addr, write_addr;
 	int err = 0;
+	u32 addr;
 
 	mt7622_trigger_hif_int(dev, true);
 
-	read_addr = is_mt7663(mdev) ? MT_CONN_HIF_ON_LPCTL : MT_CFG_LPCR_HOST;
-	if (!mt76_get_field(dev, read_addr, MT_CFG_LPCR_HOST_FW_OWN))
+	if (!test_and_clear_bit(MT76_STATE_PM, &mphy->state))
 		goto out;
 
-	write_addr = is_mt7663(mdev) ? MT_PCIE_DOORBELL_PUSH : MT_CFG_LPCR_HOST;
-	mt76_wr(dev, write_addr, MT_CFG_LPCR_HOST_DRV_OWN);
+	addr = is_mt7663(mdev) ? MT_PCIE_DOORBELL_PUSH : MT_CFG_LPCR_HOST;
+	mt76_wr(dev, addr, MT_CFG_LPCR_HOST_DRV_OWN);
 
 	dev->counter++;
 	if (dev->counter != 1) printk("%s: unbalance drv_own [%d]\n", __func__, dev->counter);
 
-	if (!mt76_poll_msec(dev, read_addr, MT_CFG_LPCR_HOST_FW_OWN, 0, 3000)) {
+	addr = is_mt7663(mdev) ? MT_CONN_HIF_ON_LPCTL : MT_CFG_LPCR_HOST;
+	if (!mt76_poll_msec(dev, addr, MT_CFG_LPCR_HOST_FW_OWN, 0, 3000)) {
 		dev_err(mdev->dev, "Timeout for driver own\n");
+		set_bit(MT76_STATE_PM, &mphy->state);
 		err = -EIO;
-		goto out;
 	}
-
-	clear_bit(MT76_STATE_PM, &mphy->state);
 
 out:
 	mt7622_trigger_hif_int(dev, false);
@@ -1885,16 +1883,15 @@ EXPORT_SYMBOL_GPL(mt7615_driver_own);
 int mt7615_firmware_own(struct mt7615_dev *dev)
 {
 	struct mt76_phy *mphy = &dev->mt76.phy;
-	u32 addr, val;
 	int err = 0;
+	u32 addr;
 
 	mt7622_trigger_hif_int(dev, true);
 
-	addr = is_mt7663(&dev->mt76) ? MT_CONN_HIF_ON_LPCTL : MT_CFG_LPCR_HOST;
-	val = mt76_get_field(dev, addr, MT_CFG_LPCR_HOST_FW_OWN);
-	if (val == MT_CFG_LPCR_HOST_FW_OWN)
+	if (test_and_set_bit(MT76_STATE_PM, &mphy->state))
 		goto out;
 
+	addr = is_mt7663(&dev->mt76) ? MT_CONN_HIF_ON_LPCTL : MT_CFG_LPCR_HOST;
 	mt76_wr(dev, addr, MT_CFG_LPCR_HOST_FW_OWN);
 
 	dev->counter--;
@@ -1904,11 +1901,9 @@ int mt7615_firmware_own(struct mt7615_dev *dev)
 	    !mt76_poll_msec(dev, addr, MT_CFG_LPCR_HOST_FW_OWN,
 			    MT_CFG_LPCR_HOST_FW_OWN, 3000)) {
 		dev_err(dev->mt76.dev, "Timeout for firmware own\n");
+		clear_bit(MT76_STATE_PM, &mphy->state);
 		err = -EIO;
-		goto out;
 	}
-
-	set_bit(MT76_STATE_PM, &mphy->state);
 
 out:
 	mt7622_trigger_hif_int(dev, false);

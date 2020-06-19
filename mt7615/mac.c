@@ -1826,7 +1826,6 @@ void mt7615_pm_wake_work(struct work_struct *work)
 	tasklet_schedule(&dev->mt76.tx_tasklet);
 
 out:
-	clear_bit(MT76_STATE_WAKE_SCHED, &mphy->state);
 	ieee80211_wake_queues(mphy->hw);
 	complete_all(&dev->pm.wake_cmpl);
 }
@@ -1848,10 +1847,8 @@ int mt7615_pm_wake(struct mt7615_dev *dev)
 	    test_bit(MT76_HW_SCHED_SCANNING, &mphy->state))
 		return 0;
 
-	if (!test_and_set_bit(MT76_STATE_WAKE_SCHED, &mphy->state)) {
+	if (queue_work(dev->mt76.wq, &dev->pm.wake_work))
 		reinit_completion(&dev->pm.wake_cmpl);
-		queue_work(dev->mt76.wq, &dev->pm.wake_work);
-	}
 
 	if (!wait_for_completion_timeout(&dev->pm.wake_cmpl, 3 * HZ)) {
 		ieee80211_wake_queues(mphy->hw);

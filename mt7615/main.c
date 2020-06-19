@@ -651,13 +651,12 @@ mt7615_wake_tx_queue(struct ieee80211_hw *hw, struct ieee80211_txq *txq)
 	if (!test_bit(MT76_STATE_RUNNING, &mphy->state))
 		return;
 
-	if (!test_bit(MT76_STATE_PM, &mphy->state)) {
-		tasklet_schedule(&dev->mt76.tx_tasklet);
+	if (test_bit(MT76_STATE_PM, &mphy->state)) {
+		queue_work(dev->mt76.wq, &dev->pm.wake_work);
 		return;
 	}
 
-	if (!test_and_set_bit(MT76_STATE_WAKE_SCHED, &mphy->state))
-		queue_work(dev->mt76.wq, &dev->pm.wake_work);
+	tasklet_schedule(&dev->mt76.tx_tasklet);
 }
 
 static void mt7615_tx(struct ieee80211_hw *hw,
@@ -701,8 +700,7 @@ static void mt7615_tx(struct ieee80211_hw *hw,
 		ieee80211_stop_queues(hw);
 		dev->pm.tx_q[qid].msta = msta;
 		dev->pm.tx_q[qid].skb = skb;
-		if (!test_and_set_bit(MT76_STATE_WAKE_SCHED, &mphy->state))
-			queue_work(dev->mt76.wq, &dev->pm.wake_work);
+		queue_work(dev->mt76.wq, &dev->pm.wake_work);
 	} else {
 		dev_kfree_skb(skb);
 	}

@@ -1867,7 +1867,7 @@ int mt7615_driver_own(struct mt7615_dev *dev)
 	if (dev->counter != 1) printk("%s: unbalance drv_own [%d]\n", __func__, dev->counter);
 
 	addr = is_mt7663(mdev) ? MT_CONN_HIF_ON_LPCTL : MT_CFG_LPCR_HOST;
-	if (!mt76_poll_msec(dev, addr, MT_CFG_LPCR_HOST_FW_OWN, 0, 3000)) {
+	if (!mt76_poll_msec(dev, addr, MT_CFG_LPCR_HOST_FW_OWN, 0, 50)) {
 		dev_err(mdev->dev, "Timeout for driver own\n");
 		set_bit(MT76_STATE_PM, &mphy->state);
 		err = -EIO;
